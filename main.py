@@ -96,6 +96,8 @@ class RoleSelectView(discord.ui.View):
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="알림 보낼 역할 선택 (선택 사항)", min_values=0, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         role = select.values[0] if select.values else None
+        # 안내 메시지 즉시 삭제
+        await interaction.message.delete()
         if self.mode == "recruit":
             await interaction.response.send_modal(RecruitModal(role))
         else:
@@ -103,19 +105,21 @@ class RoleSelectView(discord.ui.View):
 
     @discord.ui.button(label="알림 없이 바로 작성", style=discord.ButtonStyle.gray)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 안내 메시지 즉시 삭제
+        await interaction.message.delete()
         if self.mode == "recruit":
             await interaction.response.send_modal(RecruitModal(None))
         else:
             await interaction.response.send_modal(ScheduleModal(None))
 
-# --- 3. 모달 클래스 (RecruitModal, ScheduleModal) ---
+# --- 3. 모달 클래스 ---
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     def __init__(self, target_role):
         super().__init__()
         self.target_role = target_role
-    title_in = discord.ui.TextInput(label='모집 제목', placeholder='예: 뿔암 정복', required=True)
-    time_in = discord.ui.TextInput(label='출발 시간', placeholder='예: 23:00', required=True)
-    limit_in = discord.ui.TextInput(label='모집 인원', placeholder='숫자만 입력', required=True)
+    title_in = discord.ui.TextInput(label='모집 제목', placeholder='예: 뿔암 정복')
+    time_in = discord.ui.TextInput(label='출발 시간', placeholder='예: 23:00')
+    limit_in = discord.ui.TextInput(label='모집 인원', placeholder='숫자만 입력')
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -129,26 +133,24 @@ class ScheduleModal(discord.ui.Modal, title='📅 일정 체크 작성'):
     def __init__(self, target_role):
         super().__init__()
         self.target_role = target_role
-    title_in = discord.ui.TextInput(label='일정 제목', placeholder='예: 요새전 지원', required=True)
-    time_in = discord.ui.TextInput(label='일시', placeholder='예: 토요일 저녁 9시', required=True)
+    title_in = discord.ui.TextInput(label='일정 제목', placeholder='예: 요새전 지원')
+    time_in = discord.ui.TextInput(label='일시', placeholder='예: 토요일 저녁 9시')
 
     async def on_submit(self, interaction: discord.Interaction):
         view = ScheduleView(self.title_in.value, self.time_in.value)
         mention = f"{self.target_role.mention}\n" if self.target_role else ""
         await interaction.response.send_message(content=f"{mention}📅 **일정 확인 부탁드립니다!**", embed=view.get_embed(), view=view)
 
-# --- 4. 봇 설정 및 명령어 ---
+# --- 4. 봇 메인 ---
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
     async def setup_hook(self): await self.tree.sync()
 
 bot = MyBot()
-
-@bot.tree.command(name="모집", description="레이드 모집을 시작합니다.")
+@bot.tree.command(name="모집")
 async def recruit(interaction: discord.Interaction):
     await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("recruit"), ephemeral=True)
-
-@bot.tree.command(name="일정", description="일정 체크를 시작합니다.")
+@bot.tree.command(name="일정")
 async def schedule(interaction: discord.Interaction):
     await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("schedule"), ephemeral=True)
 
