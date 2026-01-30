@@ -11,11 +11,12 @@ class RaidView(discord.ui.View):
         super().__init__(timeout=None)
         self.title, self.time, self.limit = title, time, limit
         self.duration_min = duration_min
-        self.author = author  # 모집글 작성자
+        self.author = author
+        self.end_time = datetime.now() + timedelta(minutes=duration_min)
         self.roles = ["수호성", "검성", "살성", "궁성", "마도성", "정령성", "치유성", "호법성"]
         self.role_icons = {"수호성": "🛡️", "검성": "🗡️", "살성": "⚔️", "궁성": "🏹", "마도성": "🔥", "정령성": "✨", "치유성": "❤️", "호법성": "🪄"}
         self.roster = {role: [] for role in self.roles}
-        self.participants = set() # 알림을 보낼 유저 ID 저장
+        self.participants = set()
         self.is_closed = False
         self.create_buttons()
 
@@ -44,9 +45,13 @@ class RaidView(discord.ui.View):
         color = 0x5865F2 if not closed else 0x99AAB5
         status_text = " (모집 종료)" if closed else ""
         
+        display_end_time = self.end_time.strftime('%H:%M')
+        # [수정] 띄어쓰기 반영: 모집 마감 시간 -> 모집 마감시간
         embed = discord.Embed(title=f"⚔️ {self.title}{status_text}", 
-                              description=f"📅 **일시:** {self.time}\n👥 **정원:** {self.limit}명 (현재 {curr}명)\n⏳ **남은 모집 시간:** {self.duration_min}분", 
+                              description=f"📅 **일시:** {self.time}\n👥 **정원:** {self.limit}명 (현재 {curr}명)\n⏰ **모집 마감시간:** {display_end_time} 까지", 
                               color=color)
+        
+        embed.set_author(name=f"모집자: {self.author.display_name}", icon_url=self.author.display_avatar.url)
         
         line1 = "".join([f"{self.role_icons[r]} **{r}**: {', '.join(self.roster[r]) if self.roster[r] else '대기 중'}\n" for r in ["수호성", "검성", "살성", "궁성"]])
         embed.add_field(name="\u200b", value=line1, inline=True)
@@ -55,26 +60,25 @@ class RaidView(discord.ui.View):
         
         if closed:
             embed.set_footer(text="이 모집은 종료되었습니다.")
+        else:
+            embed.set_footer(text=f"설정한 모집 기간({self.duration_min}분)이 지나면 자동으로 마감됩니다.")
+            
         return embed
 
     async def close_raid(self, interaction_or_channel):
         if self.is_closed: return
         self.is_closed = True
-        for item in self.children: item.disabled = True # 모든 버튼 비활성화
+        for item in self.children: item.disabled = True
         
-        # 임베드 업데이트
         embed = self.get_embed(closed=True)
-        
-        # 알림 멘션 생성
         mentions = " ".join([f"<@{uid}>" for uid in self.participants])
-        msg = f"{mentions}\n🏁 **'{self.title}' 모집이 종료되었습니다!**" if mentions else "🏁 **모집이 종료되었습니다.** (참여 인원 없음)"
+        msg = f"{mentions}\n🏁 **'{self.title}' 모집이 종료되었습니다!**" if mentions else "🏁 **모집이 종료되었습니다.**"
         
         if isinstance(interaction_or_channel, discord.Interaction):
             await interaction_or_channel.edit_original_response(embed=embed, view=self)
             await interaction_or_channel.followup.send(msg)
         else:
-            # 타이머에 의해 자동 종료될 때
-            pass # 타이머 함수에서 처리
+            pass 
 
     async def button_callback(self, interaction: discord.Interaction):
         if self.is_closed:
@@ -83,7 +87,6 @@ class RaidView(discord.ui.View):
         role_name, user_name = interaction.data['custom_id'], interaction.user.display_name
         user_id = interaction.user.id
         
-        # 중복 제거 및 이동 처리
         for r in self.roster:
             if user_name in self.roster[r]: self.roster[r].remove(user_name)
         
@@ -92,16 +95,14 @@ class RaidView(discord.ui.View):
             return await interaction.response.send_message("마감되었습니다.", ephemeral=True)
             
         self.roster[role_name].append(user_name)
-        self.participants.add(user_id) # 알림 대상 추가
+        self.participants.add(user_id)
         
-        # 작성자에게 실시간 알림 (DM)
         try:
             await self.author.send(f"🔔 **[{self.title}]** 모집 알림: `{user_name}`님이 `{role_name}`으로 참여했습니다.")
-        except: pass # DM 차단 등의 경우 무시
+        except: pass
 
         await interaction.response.edit_message(embed=self.get_embed(), view=self)
         
-        # 만약 정원이 다 찼다면 즉시 마감
         if sum(len(self.roster[r]) for r in self.roles) >= self.limit:
             await self.close_raid(interaction)
 
@@ -136,7 +137,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     title_in = discord.ui.TextInput(label='모집 제목', placeholder='예: 뿔암 정복')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='예: 23:00')
     limit_in = discord.ui.TextInput(label='모집 인원', placeholder='숫자만 입력')
-    duration_in = discord.ui.TextInput(label='모집 기간 (분)', placeholder='예: 10 (숫자만)', default="30")
+    duration_in = discord.ui.TextInput(label='모집 기간 (분)', placeholder='예: 30', default="30")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -147,16 +148,17 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
             view = RaidView(self.title_in.value, self.time_in.value, limit_val, dur_val, interaction.user)
             mention = f"{self.target_role.mention}\n" if self.target_role else ""
             
-            msg = await interaction.response.send_message(content=f"{mention}🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
+            await interaction.response.send_message(content=f"{mention}🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
             original_msg = await interaction.original_response()
 
-            # 타이머 시작 (비동기)
             async def timer():
                 await asyncio.sleep(dur_val * 60)
                 if not view.is_closed:
-                    await view.close_raid(None) # 상태 변경
+                    view.is_closed = True
+                    for item in view.children: item.disabled = True
                     mentions = " ".join([f"<@{uid}>" for uid in view.participants])
-                    final_msg = f"{mentions}\n🏁 **시간 초과로 '{view.title}' 모집이 종료되었습니다!**" if mentions else "🏁 **시간 초과로 모집이 종료되었습니다.**"
+                    # [수정] 띄어쓰기 반영: 모집 마감시간
+                    final_msg = f"{mentions}\n🏁 **모집 마감시간이 되어 '{view.title}' 모집이 종료되었습니다!**" if mentions else "🏁 **모집 마감시간이 되어 모집이 종료되었습니다.**"
                     await original_msg.edit(embed=view.get_embed(closed=True), view=view)
                     await original_msg.reply(final_msg)
             
@@ -172,11 +174,13 @@ class ScheduleModal(discord.ui.Modal, title='📅 일정 체크 작성'):
     time_in = discord.ui.TextInput(label='일시', placeholder='예: 토요일 저녁 9시')
 
     async def on_submit(self, interaction: discord.Interaction):
-        try: await self.parent_msg.delete()
+        try:
+            await self.parent_msg.delete()
+            embed = discord.Embed(title=f"📅 {self.title_in.value}", description=f"⏰ **시간:** {self.time_in.value}", color=0x2ECC71)
+            embed.set_author(name=f"작성자: {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+            mention = f"{self.target_role.mention}\n" if self.target_role else ""
+            await interaction.response.send_message(content=f"{mention}📅 **일정 확인 부탁드립니다!**", embed=embed)
         except: pass
-        from .main import ScheduleView # 내부 참조 방지
-        # 일정 체크는 기존과 동일하게 유지하거나 필요 시 위와 비슷하게 확장 가능합니다.
-        await interaction.response.send_message("일정 체크 기능은 기존과 동일하게 작동합니다.")
 
 # --- 3. 봇 메인 ---
 class MyBot(commands.Bot):
@@ -187,5 +191,9 @@ bot = MyBot()
 @bot.tree.command(name="모집")
 async def recruit(interaction: discord.Interaction):
     await interaction.response.send_message("알림을 보낼 역할이 있나요?", view=RoleSelectView("recruit"))
+
+@bot.tree.command(name="일정")
+async def schedule(interaction: discord.Interaction):
+    await interaction.response.send_message("알림을 보낼 역할이 있나요?", view=RoleSelectView("schedule"))
 
 bot.run(os.getenv('TOKEN'))
