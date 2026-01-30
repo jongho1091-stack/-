@@ -30,7 +30,6 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # "get off" 규칙 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -93,50 +92,58 @@ class RoleSelectView(discord.ui.View):
     def __init__(self, mode):
         super().__init__(timeout=60)
         self.mode = mode
+        self.message = None # 원본 메시지 저장을 위한 변수
 
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="알림 보낼 역할 선택 (선택 사항)", min_values=0, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         role = select.values[0] if select.values else None
-        # [수정] 모달은 반드시 response.send_modal로 호출해야 합니다.
-        if self.mode == "recruit":
-            await interaction.response.send_modal(RecruitModal(role))
-        else:
-            await interaction.response.send_modal(ScheduleModal(role))
+        modal = RecruitModal(role, interaction.message) if self.mode == "recruit" else ScheduleModal(role, interaction.message)
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="알림 없이 바로 작성", style=discord.ButtonStyle.gray)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # [수정] 모달은 반드시 response.send_modal로 호출해야 합니다.
-        if self.mode == "recruit":
-            await interaction.response.send_modal(RecruitModal(None))
-        else:
-            await interaction.response.send_modal(ScheduleModal(None))
+        modal = RecruitModal(None, interaction.message) if self.mode == "recruit" else ScheduleModal(None, interaction.message)
+        await interaction.response.send_modal(modal)
 
 # --- 3. 모달 클래스 ---
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
-    def __init__(self, target_role):
+    def __init__(self, target_role, parent_msg):
         super().__init__()
         self.target_role = target_role
+        self.parent_msg = parent_msg # 지워야 할 원본 안내 메시지
+        
     title_in = discord.ui.TextInput(label='모집 제목', placeholder='예: 뿔암 정복')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='예: 23:00')
     limit_in = discord.ui.TextInput(label='모집 인원', placeholder='숫자만 입력')
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            # 1. 원본 안내 메시지 삭제
+            try: await self.parent_msg.delete()
+            except: pass
+            
+            # 2. 모집글 작성
             val = re.sub(r'[^0-9]', '', self.limit_in.value)
             view = RaidView(self.title_in.value, self.time_in.value, int(val))
             mention = f"{self.target_role.mention}\n" if self.target_role else ""
-            # 글을 올릴 때 이전 에페머럴 안내 메시지는 자동으로 무시됩니다.
             await interaction.response.send_message(content=f"{mention}🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
         except Exception as e: await interaction.response.send_message(f"🚨 오류: {e}", ephemeral=True)
 
 class ScheduleModal(discord.ui.Modal, title='📅 일정 체크 작성'):
-    def __init__(self, target_role):
+    def __init__(self, target_role, parent_msg):
         super().__init__()
         self.target_role = target_role
+        self.parent_msg = parent_msg # 지워야 할 원본 안내 메시지
+
     title_in = discord.ui.TextInput(label='일정 제목', placeholder='예: 요새전 지원')
     time_in = discord.ui.TextInput(label='일시', placeholder='예: 토요일 저녁 9시')
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 1. 원본 안내 메시지 삭제
+        try: await self.parent_msg.delete()
+        except: pass
+        
+        # 2. 일정글 작성
         view = ScheduleView(self.title_in.value, self.time_in.value)
         mention = f"{self.target_role.mention}\n" if self.target_role else ""
         await interaction.response.send_message(content=f"{mention}📅 **일정 확인 부탁드립니다!**", embed=view.get_embed(), view=view)
@@ -149,7 +156,6 @@ class MyBot(commands.Bot):
 bot = MyBot()
 @bot.tree.command(name="모집")
 async def recruit(interaction: discord.Interaction):
-    # [핵심] 안내 메시지를 ephemeral=True로 보내면 작성 완료 후 깔끔하게 관리됩니다.
     await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("recruit"), ephemeral=True)
 @bot.tree.command(name="일정")
 async def schedule(interaction: discord.Interaction):
