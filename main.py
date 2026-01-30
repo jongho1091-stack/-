@@ -30,6 +30,7 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
+        # "get off" 규칙 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -96,21 +97,21 @@ class RoleSelectView(discord.ui.View):
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="알림 보낼 역할 선택 (선택 사항)", min_values=0, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         role = select.values[0] if select.values else None
-        # 안내 메시지 즉시 삭제
-        await interaction.message.delete()
+        # 상호작용 실패 방지를 위해 edit_message를 먼저 사용합니다.
+        await interaction.response.edit_message(content="✅ 입력창을 불러오는 중입니다...", view=None)
         if self.mode == "recruit":
-            await interaction.response.send_modal(RecruitModal(role))
+            await interaction.followup.send_modal(RecruitModal(role))
         else:
-            await interaction.response.send_modal(ScheduleModal(role))
+            await interaction.followup.send_modal(ScheduleModal(role))
 
     @discord.ui.button(label="알림 없이 바로 작성", style=discord.ButtonStyle.gray)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 안내 메시지 즉시 삭제
-        await interaction.message.delete()
+        # 상호작용 실패 방지를 위해 edit_message를 먼저 사용합니다.
+        await interaction.response.edit_message(content="✅ 입력창을 불러오는 중입니다...", view=None)
         if self.mode == "recruit":
-            await interaction.response.send_modal(RecruitModal(None))
+            await interaction.followup.send_modal(RecruitModal(None))
         else:
-            await interaction.response.send_modal(ScheduleModal(None))
+            await interaction.followup.send_modal(ScheduleModal(None))
 
 # --- 3. 모달 클래스 ---
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
