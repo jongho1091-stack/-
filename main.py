@@ -28,7 +28,6 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # "get off" 규칙 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -85,11 +84,11 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(예시: 뿔암 / 정복 / 일반 / 부캐팟)')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='(예시: 23:00 출발)')
     limit_in = discord.ui.TextInput(label='인원', placeholder='(숫자만 적어주세요.)')
-    # 길드장님이 요청하신 예시 문구 반영
+    # default="30분"을 제거하여 빈 칸으로 표시
     dur_in = discord.ui.TextInput(
         label='모집 마감시간 설정', 
         placeholder='(예시: 30분 or 1시간 30분 or 3시간)',
-        default="30분"
+        required=True
     )
 
     def __init__(self, role):
@@ -99,7 +98,6 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            # 인원 숫자 추출
             l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
             limit = int(l_str) if l_str else 6
             
@@ -108,19 +106,16 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
             final_minutes = 0
             
             if "시간" in raw_dur:
-                # '시간' 앞의 숫자와 '분' 앞의 숫자를 각각 추출
                 hours = re.findall(r'(\d+(?:\.\d+)?)시간', raw_dur)
                 minutes = re.findall(r'(\d+)분', raw_dur)
-                
                 if hours: final_minutes += int(float(hours[0]) * 60)
                 if minutes: final_minutes += int(minutes[0])
-                # 숫자만 띡 적었는데 '시간'이 포함된 경우 (예: 2시간) 처리
                 if not hours and not minutes:
                     only_num = re.sub(r'[^0-9.]', '', raw_dur)
                     final_minutes = int(float(only_num) * 60) if only_num else 60
             else:
-                # '시간'이라는 단어가 없으면 전체를 '분'으로 간주
                 num_only = re.sub(r'[^0-9]', '', raw_dur)
+                # 아무것도 안 적었을 경우를 대비한 기본값 30
                 final_minutes = int(num_only) if num_only else 30
 
             view = RaidView(self.title_in.value, self.time_in.value, limit, final_minutes, interaction.user)
@@ -143,9 +138,8 @@ class MyBot(commands.Bot):
 bot = MyBot()
 
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
-@app_commands.describe(알람_역할="알림을 보낼 역할(태그)을 선택하세요 (생략 가능).")
+@app_commands.describe(알람_역할="알림을 보낼 역할(태그)을 선택하세요.")
 async def recruit(interaction: discord.Interaction, 알람_역할: discord.Role = None):
-    # 이제 마감 시간을 미리 고를 필요 없이 바로 모달을 띄웁니다.
     await interaction.response.send_modal(RecruitModal(알람_역할))
 
 bot.run(os.getenv('TOKEN'))
