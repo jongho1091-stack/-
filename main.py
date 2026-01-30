@@ -92,11 +92,11 @@ class RoleSelectView(discord.ui.View):
     def __init__(self, mode):
         super().__init__(timeout=60)
         self.mode = mode
-        self.message = None # 원본 메시지 저장을 위한 변수
 
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="알림 보낼 역할 선택 (선택 사항)", min_values=0, max_values=1)
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         role = select.values[0] if select.values else None
+        # 안내 메시지를 모달에 넘겨줍니다.
         modal = RecruitModal(role, interaction.message) if self.mode == "recruit" else ScheduleModal(role, interaction.message)
         await interaction.response.send_modal(modal)
 
@@ -109,41 +109,32 @@ class RoleSelectView(discord.ui.View):
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     def __init__(self, target_role, parent_msg):
         super().__init__()
-        self.target_role = target_role
-        self.parent_msg = parent_msg # 지워야 할 원본 안내 메시지
-        
+        self.target_role, self.parent_msg = target_role, parent_msg
     title_in = discord.ui.TextInput(label='모집 제목', placeholder='예: 뿔암 정복')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='예: 23:00')
     limit_in = discord.ui.TextInput(label='모집 인원', placeholder='숫자만 입력')
 
     async def on_submit(self, interaction: discord.Interaction):
-        try:
-            # 1. 원본 안내 메시지 삭제
-            try: await self.parent_msg.delete()
-            except: pass
-            
-            # 2. 모집글 작성
-            val = re.sub(r'[^0-9]', '', self.limit_in.value)
-            view = RaidView(self.title_in.value, self.time_in.value, int(val))
-            mention = f"{self.target_role.mention}\n" if self.target_role else ""
-            await interaction.response.send_message(content=f"{mention}🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
-        except Exception as e: await interaction.response.send_message(f"🚨 오류: {e}", ephemeral=True)
+        # 1. 원본 안내 메시지 즉시 삭제 (일반 메시지이므로 삭제 가능)
+        try: await self.parent_msg.delete()
+        except: pass
+        
+        # 2. 결과물 출력
+        val = re.sub(r'[^0-9]', '', self.limit_in.value)
+        view = RaidView(self.title_in.value, self.time_in.value, int(val))
+        mention = f"{self.target_role.mention}\n" if self.target_role else ""
+        await interaction.response.send_message(content=f"{mention}🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
 
 class ScheduleModal(discord.ui.Modal, title='📅 일정 체크 작성'):
     def __init__(self, target_role, parent_msg):
         super().__init__()
-        self.target_role = target_role
-        self.parent_msg = parent_msg # 지워야 할 원본 안내 메시지
-
+        self.target_role, self.parent_msg = target_role, parent_msg
     title_in = discord.ui.TextInput(label='일정 제목', placeholder='예: 요새전 지원')
     time_in = discord.ui.TextInput(label='일시', placeholder='예: 토요일 저녁 9시')
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. 원본 안내 메시지 삭제
         try: await self.parent_msg.delete()
         except: pass
-        
-        # 2. 일정글 작성
         view = ScheduleView(self.title_in.value, self.time_in.value)
         mention = f"{self.target_role.mention}\n" if self.target_role else ""
         await interaction.response.send_message(content=f"{mention}📅 **일정 확인 부탁드립니다!**", embed=view.get_embed(), view=view)
@@ -156,9 +147,10 @@ class MyBot(commands.Bot):
 bot = MyBot()
 @bot.tree.command(name="모집")
 async def recruit(interaction: discord.Interaction):
-    await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("recruit"), ephemeral=True)
+    # [수정] ephemeral=True를 제거하여 봇이 삭제할 수 있도록 합니다.
+    await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("recruit"))
 @bot.tree.command(name="일정")
 async def schedule(interaction: discord.Interaction):
-    await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("schedule"), ephemeral=True)
+    await interaction.response.send_message("알림을 보낼 역할이 있나요? (없으면 바로 작성을 누르세요)", view=RoleSelectView("schedule"))
 
 bot.run(os.getenv('TOKEN'))
