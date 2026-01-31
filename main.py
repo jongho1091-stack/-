@@ -12,7 +12,6 @@ class RaidView(discord.ui.View):
         super().__init__(timeout=None)
         self.title, self.time, self.limit = title, time, limit
         self.author = author
-        # 한국 시각 계산 (UTC+9)
         self.end_time = datetime.utcnow() + timedelta(hours=9) + timedelta(minutes=duration_min)
         self.roles = ["수호성", "검성", "살성", "궁성", "마도성", "정령성", "치유성", "호법성"]
         self.role_icons = {"수호성": "🛡️", "검성": "🗡️", "살성": "⚔️", "궁성": "🏹", "마도성": "🔥", "정령성": "✨", "치유성": "❤️", "호법성": "🪄"}
@@ -37,8 +36,6 @@ class RaidView(discord.ui.View):
         curr = sum(len(self.roster[r]) for r in self.roles)
         color = 0x5865F2 if not closed else 0x99AAB5
         display_time = self.end_time.strftime('%H:%M')
-        
-        # 모집자 정보를 제목 바로 위에 배치
         desc = (
             f"**👤 모집자: {self.author.display_name}**\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -46,19 +43,10 @@ class RaidView(discord.ui.View):
             f"👥 **정원:** {self.limit}명 (현재 {curr}명)\n"
             f"⏰ **모집 마감시간:** {display_time} 까지"
         )
-        
-        embed = discord.Embed(
-            title=f"⚔️ {self.title}{' (모집 종료)' if closed else ''}", 
-            description=desc, 
-            color=color
-        )
-        
+        embed = discord.Embed(title=f"⚔️ {self.title}{' (모집 종료)' if closed else ''}", description=desc, color=color)
         for i in range(0, 8, 4):
             val = "".join([f"{self.role_icons[r]} **{r}**: {', '.join(self.roster[r]) if self.roster[r] else '대기 중'}\n" for r in self.roles[i:i+4]])
             embed.add_field(name="\u200b", value=val, inline=True)
-            
-        if closed:
-            embed.set_footer(text="이 모집은 종료되었습니다.")
         return embed
 
     async def button_callback(self, interaction: discord.Interaction):
@@ -98,20 +86,18 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     limit_in = discord.ui.TextInput(label='인원', placeholder='(숫자만 적어주세요.)')
     dur_in = discord.ui.TextInput(label='모집 마감시간 설정', placeholder='(예시: 30분 or 1시간 30분 or 3시간)')
 
-    def __init__(self, role, original_msg):
+    def __init__(self, role):
         super().__init__()
-        self.role, self.original_msg = role, original_msg
+        self.role = role
 
     async def on_submit(self, interaction: discord.Interaction):
-        # [중요] 응답 지연 처리로 404 에러 방지
+        # [수정] 즉시 응답하여 '나만 보는 메시지'를 제거 시도
+        # delete_original_response를 사용하면 창이 사라집니다.
         await interaction.response.defer(ephemeral=True)
+        
         try:
-            # 역할 선택 메시지 삭제 시도 (실패해도 모집글은 올라가도록 예외처리)
-            if self.original_msg:
-                try:
-                    await self.original_msg.delete()
-                except:
-                    pass 
+            # 모집글 작성이 정상적으로 되면 나만 보는 창을 닫음
+            await interaction.delete_original_response()
             
             l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
             limit = int(l_str) if l_str else 6
@@ -123,15 +109,14 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
                 minutes = re.findall(r'(\d+)분', raw_dur)
                 if hours: final_minutes += int(float(hours[0]) * 60)
                 if minutes: final_minutes += int(minutes[0])
-                if not hours and not minutes:
-                    only_num = re.sub(r'[^0-9.]', '', raw_dur)
-                    final_minutes = int(float(only_num) * 60) if only_num else 60
             else:
                 num_only = re.sub(r'[^0-9]', '', raw_dur)
                 final_minutes = int(num_only) if num_only else 30
 
             view = RaidView(self.title_in.value, self.time_in.value, limit, final_minutes, interaction.user)
             ment = self.role.mention if self.role else ""
+            
+            # 실제 채널에 모집글 전송
             sent_msg = await interaction.followup.send(content=f"{ment} 🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
             
             async def timer():
@@ -144,13 +129,15 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
 # --- 3. 역할 선택 뷰 ---
 class RoleSelectView(discord.ui.View):
     def __init__(self): super().__init__(timeout=60)
+    
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요 (없으면 건너뛰기)")
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
-        # 선택 즉시 모달 띄우기
-        await interaction.response.send_modal(RecruitModal(select.values[0], interaction.message))
+        # 모달을 띄우는 상호작용
+        await interaction.response.send_modal(RecruitModal(select.values[0]))
+
     @discord.ui.button(label="알림 없이 바로 작성", style=discord.ButtonStyle.gray)
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(RecruitModal(None, interaction.message))
+        await interaction.response.send_modal(RecruitModal(None))
 
 # --- 4. 봇 실행 ---
 class MyBot(commands.Bot):
@@ -163,7 +150,7 @@ bot = MyBot()
 
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
 async def recruit(interaction: discord.Interaction):
-    # 에페메럴(나에게만 보임) 메시지로 역할 선택창 띄우기
+    # 이 메시지가 '나만 보는' 메시지이며, 작성이 끝나면 삭제됩니다.
     await interaction.response.send_message("알림을 보낼 역할이 있나요?", view=RoleSelectView(), ephemeral=True)
 
 bot.run(os.getenv('TOKEN'))
