@@ -27,7 +27,7 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # [2025-08-22] "get off" 규칙 반영
+        # [2025-08-22] character change 시 "get off" 사용
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -37,7 +37,6 @@ class RaidView(discord.ui.View):
         color = 0x5865F2 if not closed else 0x99AAB5
         now = datetime.utcnow() + timedelta(hours=9)
         
-        # 마감 시간 표시 (서울 시간 기준)
         if self.end_time.year > now.year:
             display_time = self.end_time.strftime('%Y/%m/%d %H:%M')
         elif self.end_time.date() > now.date():
@@ -61,17 +60,13 @@ class RaidView(discord.ui.View):
     async def button_callback(self, interaction: discord.Interaction):
         if self.is_closed: return
         role, name, uid = interaction.data['custom_id'], interaction.user.display_name, interaction.user.id
-        
         for r in self.roster:
             if name in self.roster[r]: self.roster[r].remove(name)
-            
         if sum(len(self.roster[r]) for r in self.roles) < self.limit:
             self.roster[role].append(name)
             self.participants.add(uid)
-            # [기본] 모집자에게만 DM 알림
             try: await self.author.send(f"🔔 **[{self.title}]** {name}님이 {role}로 참여했습니다.")
             except: pass
-        
         await interaction.response.edit_message(embed=self.get_embed())
         if sum(len(self.roster[r]) for r in self.roles) >= self.limit:
             await self.close_raid(interaction.message)
@@ -101,9 +96,9 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
     limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (예: 6)')
     dur_in = discord.ui.TextInput(
         label='모집 마감시간 (서울 기준)', 
-        placeholder='예: 21:00 (시각만 쓰면 오늘 해당시간 마감)',
+        placeholder='예: 21:00 / 26년 2월 5일 저녁 8시',
         style=discord.TextStyle.paragraph,
-        default='26년 2월 5일 20시 또는 30분',
+        default='26년 2월 5일 저녁 8시',
         required=True
     )
 
@@ -118,47 +113,57 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집 작성'):
             now = datetime.utcnow() + timedelta(hours=9)
             raw_dur = self.dur_in.value.strip()
             
+            nums = [int(n) for n in re.findall(r'\d+', raw_dur)]
             target_dt = now
-            nums = re.findall(r'\d+', raw_dur)
             
-            if "시간" in raw_dur or "분" in raw_dur:
-                final_minutes = 0
-                h = re.findall(r'(\d+(?:\.\d+)?)시간', raw_dur.replace(" ", ""))
-                m = re.findall(r'(\d+)분', raw_dur.replace(" ", ""))
-                if h: final_minutes += int(float(h[0]) * 60)
-                if m: final_minutes += int(m[0])
-                target_dt = now + timedelta(minutes=final_minutes)
-            elif nums:
-                time_str = "".join(nums)
-                if len(time_str) == 4:
-                    target_dt = now.replace(hour=int(time_str[:2]), minute=int(time_str[2:]), second=0, microsecond=0)
-                    if target_dt < now: target_dt += timedelta(days=1)
-                elif len(time_str) == 10:
-                    target_dt = datetime(year=2000+int(time_str[:2]), month=int(time_str[2:4]), day=int(time_str[4:6]), hour=int(time_str[6:8]), minute=int(time_str[8:]), second=0)
-                elif len(time_str) == 12:
-                    target_dt = datetime(year=int(time_str[:4]), month=int(time_str[4:6]), day=int(time_str[6:8]), hour=int(time_str[8:10]), minute=int(time_str[10:]), second=0)
-                else:
-                    target_dt = now + timedelta(minutes=int(time_str))
-            else:
-                target_dt = now + timedelta(minutes=30)
+            # 오후/저녁 키워드 체크
+            add_12 = 12 if any(x in raw_dur for x in ["오후", "저녁", "밤", "pm", "PM"]) else 0
 
-            sleep_seconds = (target_dt - now).total_seconds()
-            if sleep_seconds < 0: sleep_seconds = 0
+            if "시간" in raw_dur or "분" in raw_dur:
+                final_min = 0
+                h = re.findall(r'(\d+)시간', raw_dur.replace(" ", ""))
+                m = re.findall(r'(\d+)분', raw_dur.replace(" ", ""))
+                if h: final_min += int(h[0]) * 60
+                if m: final_min += int(m[0])
+                target_dt = now + timedelta(minutes=final_min)
+            
+            elif len(nums) >= 4: # 연/월/일/시 포함 시
+                yr = nums[0] + 2000 if nums[0] < 100 else nums[0]
+                hr = nums[3]
+                if add_12 and hr < 12: hr += 12
+                mn = nums[4] if len(nums) > 4 else 0
+                target_dt = datetime(yr, nums[1], nums[2], hr, mn)
+            
+            elif len(nums) == 3: # 월/일/시 포함 시
+                hr = nums[2]
+                if add_12 and hr < 12: hr += 12
+                target_dt = now.replace(month=nums[0], day=nums[1], hour=hr, minute=0, second=0, microsecond=0)
+            
+            elif ":" in raw_dur or (len(nums) == 1 and len(str(nums[0])) >= 3):
+                t_str = str(nums[0]).zfill(4) if len(nums) == 1 else f"{nums[0]:02}{nums[1]:02}"
+                hr = int(t_str[:2])
+                if add_12 and hr < 12: hr += 12
+                target_dt = now.replace(hour=hr, minute=int(t_str[2:]), second=0, microsecond=0)
+                if target_dt < now: target_dt += timedelta(days=1)
+            else:
+                target_dt = now + timedelta(minutes=(nums[0] if nums else 30))
+
+            if target_dt <= now: target_dt = now + timedelta(minutes=30)
+            sleep_sec = (target_dt - now).total_seconds()
 
             l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
             limit = int(l_str) if l_str else 6
-
             view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
             ment = self.role.mention if self.role else ""
             sent_msg = await interaction.followup.send(content=f"{ment} 🌲 **레이드 모집이 시작되었습니다!**", embed=view.get_embed(), view=view)
             
             async def timer():
-                await asyncio.sleep(sleep_seconds)
+                await asyncio.sleep(max(0, sleep_sec))
                 await view.close_raid(sent_msg)
             asyncio.create_task(timer())
             
         except Exception as e:
-            await interaction.followup.send(f"🚨 시간 형식을 확인해 주세요 (예: 26년 2월 5일 20시)", ephemeral=True)
+            await interaction.followup.send(f"🚨 시간 분석 오류: {e}", ephemeral=True)
 
 # --- 3. 역할 선택 뷰 및 봇 실행 ---
 class RoleSelectView(discord.ui.View):
@@ -171,19 +176,18 @@ class RoleSelectView(discord.ui.View):
         await interaction.response.send_modal(RecruitModal(None))
 
 class MyBot(commands.Bot):
-    def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=discord.Intents.all())
     async def setup_hook(self): await self.tree.sync()
 
 bot = MyBot()
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
 async def recruit(interaction: discord.Interaction):
-    # 길드장님을 위한 사전 가이드 메시지
     guide = (
         "🌲 **마감 시간 입력 팁**\n"
         "• `21:00` : 오늘 밤 9시 마감\n"
-        "• `26년 2월 5일 20시` : 특정 날짜 마감\n"
-        "• `1시간 30분` : 현재로부터 시간 계산\n\n"
-        "알림을 보낼 역할을 선택해주세요!"
+        "• `26년 2월 5일 저녁 8시` : 날짜/시간 지정\n"
+        "• `1시간 30분` : 지금부터 계산\n"
     )
     await interaction.response.send_message(guide, view=RoleSelectView(), ephemeral=True)
 
