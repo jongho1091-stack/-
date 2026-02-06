@@ -88,9 +88,7 @@ class RaidView(discord.ui.View):
 class TicketView(discord.ui.View):
     def __init__(self, admin_role_id, category_name, log_channel_id):
         super().__init__(timeout=None)
-        self.admin_role_id = admin_role_id
-        self.category_name = category_name
-        self.log_channel_id = log_channel_id
+        self.admin_role_id, self.category_name, self.log_channel_id = admin_role_id, category_name, log_channel_id
 
     async def create_ticket(self, interaction, type_label):
         guild, user = interaction.guild, interaction.user
@@ -111,12 +109,15 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="🚨 신고하기", style=discord.ButtonStyle.danger, custom_id="report")
     async def report(self, interaction, button): await self.create_ticket(interaction, "신고")
 
-# --- 3. 모달 및 모집 설정 ---
+# --- 3. 모집 모달 (가이드 문구 & 줄 바꿈 반영) ---
 class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(ex: 뿔암 / 정복 / 일반)')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='(ex: 26년 3월 13일 21시)')
     limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (ex: 6)')
-    dur_in = discord.ui.TextInput(label='모집 마감 시간', placeholder='ex: 2026-02-07-21:00')
+    dur_in = discord.ui.TextInput(
+        label='모집 마감 시간 (반드시 아래 예시처럼 작성)', 
+        placeholder='ex: 2026-02-07-21:00 / 이 형식으로 입력 (24시간제)'
+    )
 
     def __init__(self, role=None, setup_interaction=None):
         super().__init__()
@@ -125,6 +126,11 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        
+        user_mention = interaction.user.mention
+        role_mention = self.role.mention if self.role else ""
+        # ✅ 작성 완료 문구와 알림 문구 사이 줄 바꿈(\n\n) 적용
+        complete_msg = f"✅ {user_mention}께서 모집 작성을 완료하였습니다.\n\n{role_mention} 🌲 **모집 시작!**"
         
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
@@ -150,11 +156,6 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
         limit = int(l_str) if l_str else 6
         
-        # 꼬리표 방지 독립 전송
-        user_mention = interaction.user.mention
-        role_mention = self.role.mention if self.role else ""
-        complete_msg = f"✅ {user_mention}께서 모집 작성을 완료하였습니다.\n{role_mention} 🌲 **모집 시작!**"
-        
         view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
         sent_msg = await interaction.channel.send(content=complete_msg, embed=view.get_embed(), view=view)
         
@@ -169,16 +170,13 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
 
 class RoleSelectView(discord.ui.View):
     def __init__(self): super().__init__(timeout=60)
-    
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.Select):
         await interaction.response.send_modal(RecruitModal(select.values[0], setup_interaction=interaction))
-        
     @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
     async def no_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RecruitModal(None, setup_interaction=interaction))
 
-# --- 4. 봇 메인 및 명령어 설정 ---
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
     async def setup_hook(self): await self.tree.sync()
@@ -189,7 +187,7 @@ bot = MyBot()
 async def recruit(interaction: discord.Interaction):
     await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=False)
 
-@bot.tree.command(name="티켓설정", description="레기온 티켓 시스템을 설정합니다.")
+@bot.tree.command(name="티켓설정", description="관리자 전용: 티켓 시스템 설정")
 @app_commands.checks.has_permissions(administrator=True)
 async def ticket_setup(interaction: discord.Interaction, 관리자역할: discord.Role, 상담카테고리명: str, 로그채널명: str):
     guild = interaction.guild
