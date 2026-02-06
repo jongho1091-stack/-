@@ -36,7 +36,6 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # [2025-08-22] 캐릭터 변경 시 "get off" 사용 지침 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -97,15 +96,10 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         self.setup_interaction = setup_interaction
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. 설정창 즉시 삭제 (일반 메시지라 삭제 시 꼬리표 안 남음)
-        if self.setup_interaction:
-            try: await self.setup_interaction.delete_original_response()
-            except: pass
-        
-        # interaction 응답 처리 (ephemeral로 하여 본인에게만 시스템 응답 알림)
+        # 1. 꼬리표 방지용 defer (ephemeral로 짧게 처리)
         await interaction.response.defer(ephemeral=True)
 
-        # 2. 날짜 및 데이터 계산
+        # 2. 날짜 계산
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
         target_dt = None
@@ -130,17 +124,20 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
         limit = int(l_str) if l_str else 6
         
-        # 3. [아이디어 반영] 완료 문구 + 태그 통합
+        # 3. 독립 메시지 전송 (channel.send 사용)
         user_mention = interaction.user.mention
         role_mention = self.role.mention if self.role else ""
-        # 상단 텍스트 구성
         complete_msg = f"✅ {user_mention}께서 모집 작성을 완료하였습니다.\n{role_mention} 🌲 **모집 시작!**"
         
         view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
-        # followup으로 진짜 모집글 전송
-        sent_msg = await interaction.followup.send(content=complete_msg, embed=view.get_embed(), view=view)
+        # 중요: followup 대신 channel.send를 써서 답장 관계를 끊습니다.
+        sent_msg = await interaction.channel.send(content=complete_msg, embed=view.get_embed(), view=view)
         
-        # 마감 타이머
+        # 4. 이제 설정창을 지웁니다.
+        if self.setup_interaction:
+            try: await self.setup_interaction.delete_original_response()
+            except: pass
+
         async def timer():
             wait = (target_dt - (datetime.utcnow() + timedelta(hours=9))).total_seconds()
             await asyncio.sleep(max(0, wait)); await view.close_raid(sent_msg)
@@ -165,7 +162,7 @@ bot = MyBot()
 
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
 async def recruit(interaction: discord.Interaction):
-    # 모두가 볼 수 있게 설정하여 삭제 시 꼬리표 방지 (ephemeral=False)
+    # 모두가 볼 수 있게 설정 (ephemeral=False)
     await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=False)
 
 keep_alive()
