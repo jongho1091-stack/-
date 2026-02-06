@@ -95,7 +95,8 @@ class RaidView(discord.ui.View):
     async def force_close_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("❌ 작성자만 마감할 수 있습니다!", ephemeral=True)
-        await interaction.response.send_message("🏁 모집을 조기 마감합니다.", ephemeral=True)
+        # ✅ 마감 알림 메시지 없이 즉시 처리
+        await interaction.response.defer(ephemeral=True)
         await self.close_raid(interaction.message)
 
     async def close_raid(self, message):
@@ -138,7 +139,7 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="🚨 신고하기", style=discord.ButtonStyle.danger, custom_id="report")
     async def report(self, interaction, button): await self.create_ticket(interaction, "신고")
 
-# --- 3. 모집 설정 뷰 (버튼 복구) ---
+# --- 3. 모집 설정 뷰 ---
 class RoleSelectView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -147,7 +148,6 @@ class RoleSelectView(discord.ui.View):
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         await interaction.response.send_modal(RecruitModal(role=select.values[0], setup_interaction=interaction))
 
-    # ✅ [알림 없이 작성하기] 버튼 복구
     @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
     async def no_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RecruitModal(role=None, setup_interaction=interaction))
@@ -165,7 +165,6 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         user_mention, role_mention = interaction.user.mention, (self.role.mention if self.role else "")
-        # ✅ '께서' 앞 공백 한 칸 유지
         complete_msg = f"✅ {user_mention}께서 모집 작성을 완료하였습니다.\n\n{role_mention} 🌲 **모집 시작!**"
         
         now = datetime.utcnow() + timedelta(hours=9)
