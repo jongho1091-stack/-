@@ -15,7 +15,7 @@ def home(): return "Bot is alive!"
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- 1. 레이드 모집 뷰 ---
+# --- 1. 레이드 모집 뷰 (전체 공개용) ---
 class RaidView(discord.ui.View):
     def __init__(self, title, time, limit, end_dt, author):
         super().__init__(timeout=None)
@@ -109,7 +109,7 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="🚨 신고하기", style=discord.ButtonStyle.danger, custom_id="report")
     async def report(self, interaction, button): await self.create_ticket(interaction, "신고")
 
-# --- 3. 모달 및 명령어 ---
+# --- 3. 모달 및 모집 설정 로직 ---
 class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(ex: 뿔암 / 정복 / 일반)')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='(ex: 26년 3월 13일 21시)')
@@ -122,16 +122,28 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     def __init__(self, role=None, setup_interaction=None):
         super().__init__()
         self.role = role
-        self.setup_interaction = setup_interaction # 설정 메시지 인계
+        self.setup_interaction = setup_interaction
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 1. 제출 즉시 interaction을 잡아둡니다.
         await interaction.response.defer(ephemeral=True)
         
-        # [핵심] 모달 제출 시점에 설정 메시지를 강제로 지웁니다.
+        # 2. [본인용 설정창 처리] 완료 문구로 변경 후 3초 뒤 삭제 (잔상 방지)
         if self.setup_interaction:
-            try: await self.setup_interaction.delete_original_response()
+            try:
+                user_mention = self.setup_interaction.user.mention
+                await self.setup_interaction.edit_original_response(
+                    content=f"✅ {user_mention}께서 모집 작성을 완료하였습니다.", 
+                    view=None
+                )
+                async def cleanup():
+                    await asyncio.sleep(3)
+                    try: await self.setup_interaction.delete_original_response()
+                    except: pass
+                asyncio.create_task(cleanup())
             except: pass
 
+        # 3. [전체 공개 모집글 생성]
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
         target_dt = None
@@ -152,11 +164,16 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         if not target_dt:
             try: target_dt = now + timedelta(minutes=int(re.sub(r'[^0-9]', '', val)))
             except: target_dt = now + timedelta(minutes=30)
+            
         l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
         limit = int(l_str) if l_str else 6
+        
+        # 진짜 모집글은 followup으로 보내서 채널에 남깁니다.
         view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
         ment = self.role.mention if self.role else ""
         sent_msg = await interaction.followup.send(content=f"{ment} 🌲 **모집 시작!**", embed=view.get_embed(), view=view)
+        
+        # 마감 타이머 가동
         async def timer():
             wait = (target_dt - (datetime.utcnow() + timedelta(hours=9))).total_seconds()
             await asyncio.sleep(max(0, wait)); await view.close_raid(sent_msg)
@@ -167,7 +184,6 @@ class RoleSelectView(discord.ui.View):
     
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.Select):
-        # 상호작용을 보존하면서 모달에 원래 interaction을 넘깁니다.
         await interaction.response.send_modal(RecruitModal(select.values[0], setup_interaction=interaction))
         
     @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
@@ -182,7 +198,6 @@ bot = MyBot()
 
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
 async def recruit(interaction: discord.Interaction):
-    # epemeral=True 메시지는 delete_original_response()로 지워야 합니다.
     await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=True)
 
 @bot.tree.command(name="티켓설정", description="레기온 티켓 시스템을 설정합니다.")
