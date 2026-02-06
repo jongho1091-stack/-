@@ -36,34 +36,33 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # [2025-08-22] 캐릭터 변경 시 "get off" 사용 지침 반영
-        leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
+        # 참여 취소 버튼
+        leave_btn = discord.ui.Button(label="참여 취소", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
+
+        # ✅ 길드장님 최종 요청: 라벨 수정 "모집 마감 / 작성자 전용"
+        close_btn = discord.ui.Button(label="모집 마감 / 작성자 전용", style=discord.ButtonStyle.danger, emoji="🛑", custom_id="force_close")
+        close_btn.callback = self.force_close_callback
+        self.add_item(close_btn)
 
     def get_embed(self, closed=False):
         curr = sum(len(self.roster[r]) for r in self.roles)
         color = 0x5865F2 if not closed else 0x99AAB5
         now = datetime.utcnow() + timedelta(hours=9)
         display_time = self.end_time.strftime('%m/%d %H:%M') if self.end_time.date() > now.date() else self.end_time.strftime('%H:%M')
-        
+        # ✅ '께서' 앞 공백 한 칸 유지
         desc = (f"**👤 모집자: {self.author.display_name}**\n━━━━━━━━━━━━━━━━━━━━\n"
                 f"📅 **출발 시간:** {self.time}\n👥 **정원:** {self.limit}명 (현재 {curr}명)\n⏰ **모집 마감:** {display_time} 까지")
-        
         embed = discord.Embed(title=f"⚔️ {self.title}{' (모집 종료)' if closed else ''}", description=desc, color=color)
-        
         for i in range(0, 8, 4):
             val = "".join([f"{self.role_icons[r]} **{r}**: {', '.join(self.roster[r]) if self.roster[r] else '대기 중'}\n" for r in self.roles[i:i+4]])
             embed.add_field(name="\u200b", value=val, inline=True)
-        
         party_list = []
         for r in self.roles:
-            for p_name in self.roster[r]:
-                party_list.append(f"**{p_name}** ({r})")
-        
+            for p_name in self.roster[r]: party_list.append(f"**{p_name}** ({r})")
         list_val = "\n".join([f"> {idx+1}. {p}" for idx, p in enumerate(party_list)]) if party_list else "> 현재 참여 인원 없음"
         embed.add_field(name="👥 현재 참여 명단 (실시간)", value=list_val, inline=False)
-        
         return embed
 
     async def button_callback(self, interaction: discord.Interaction):
@@ -91,11 +90,18 @@ class RaidView(discord.ui.View):
         if interaction.user.id in self.participants: self.participants.remove(interaction.user.id)
         if removed:
             try:
-                # [2025-08-22] "get off" 사용 반영
+                # ✅ 'get off' 알림 유지
                 alert = await interaction.channel.send(f"⚪ {self.author.mention}님, **{name}** 참여 취소 (get off)")
                 await alert.delete()
             except: pass
         await interaction.response.edit_message(embed=self.get_embed())
+
+    async def force_close_callback(self, interaction: discord.Interaction):
+        # ✅ 보안 로직: 작성자 본인 확인
+        if interaction.user.id != self.author.id:
+            return await interaction.response.send_message("❌ 작성자만 마감할 수 있습니다!", ephemeral=True)
+        await interaction.response.send_message("🏁 모집을 조기 마감합니다.", ephemeral=True)
+        await self.close_raid(interaction.message)
 
     async def close_raid(self, message):
         if self.is_closed: return
@@ -126,12 +132,26 @@ class TicketView(discord.ui.View):
         await channel.send(content=f"{user.mention} | {admin_role.mention}", embed=embed)
         await interaction.response.defer(ephemeral=True)
 
-    @discord.ui.button(label="📝 건의하기", style=discord.ButtonStyle.primary, custom_id="suggest")
-    async def suggest(self, interaction, button): await self.create_ticket(interaction, "건의")
+        def check(m): return m.channel == channel and m.author.id == user.id
+        try:
+            # ✅ 상담 채널에만 적용되는 3분 자동 삭제 로직
+            await interaction.client.wait_for('message', check=check, timeout=180.0)
+        except asyncio.TimeoutError:
+            await channel.delete(reason="최초 3분간 문의자 응답 없음")
+
+    @discord.ui.button(label="📝 문의 / 건의", style=discord.ButtonStyle.success, custom_id="suggest")
+    async def suggest(self, interaction, button): await self.create_ticket(interaction, "문의-건의")
     @discord.ui.button(label="🚨 신고하기", style=discord.ButtonStyle.danger, custom_id="report")
     async def report(self, interaction, button): await self.create_ticket(interaction, "신고")
 
-# --- 3. 모집 모달 (길드장님 승인 문구/로직 고정) ---
+# --- 3. 모집 모달 및 역할 선택 ---
+class RoleSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
+    async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
+        await interaction.response.send_modal(RecruitModal(role=select.values[0], setup_interaction=interaction))
+
 class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(ex: 뿔암 / 정복 / 일반)')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='(ex: 26년 3월 13일 21시)')
@@ -145,7 +165,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         user_mention, role_mention = interaction.user.mention, (self.role.mention if self.role else "")
-        # ✅ 가이드대로 공백 한 칸 적용
+        # ✅ '께서' 앞 공백 한 칸 유지
         complete_msg = f"✅ {user_mention}께서 모집 작성을 완료하였습니다.\n\n{role_mention} 🌲 **모집 시작!**"
         
         now = datetime.utcnow() + timedelta(hours=9)
@@ -169,14 +189,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
             await asyncio.sleep(max(0, wait)); await view.close_raid(sent_msg)
         asyncio.create_task(timer())
 
-# --- 4. 기타 뷰 및 명령어 ---
-class RoleSelectView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=60)
-    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
-    async def select_role(self, interaction, select): await interaction.response.send_modal(RecruitModal(select.values[0], setup_interaction=interaction))
-    @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
-    async def no_mention(self, interaction, button): await interaction.response.send_modal(RecruitModal(None, setup_interaction=interaction))
-
+# --- 4. 봇 명령어 ---
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
     async def setup_hook(self): await self.tree.sync()
@@ -195,7 +208,8 @@ async def ticket_setup(interaction, 관리자역할: discord.Role, 상담카테�
     overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), 관리자역할: discord.PermissionOverwrite(read_messages=True)}
     log_ch = await guild.create_text_channel(name=로그채널명, overwrites=overwrites)
     view = TicketView(관리자역할.id, 상담카테고리명, log_ch.id)
-    await interaction.channel.send(embed=discord.Embed(title="📢 레기온 건의 및 신고 접수", description="상담은 운영진과 본인만 볼 수 있는 비밀 채널에서 진행됩니다.\n\n아래 버튼을 눌러 티켓을 생성하세요.", color=0x2f3136), view=view)
+    embed = discord.Embed(title="📢 레기온 문의 / 건의 및 신고 접수", description="아래 버튼을 눌러 티켓을 생성하세요.\n상담은 운영진과 본인만 볼 수 있는 비밀 채널에서 진행됩니다.\n생성된 채널은 최초 3분동안 대화가 없다면 자동으로 삭제됩니다.", color=0x2f3136)
+    await interaction.channel.send(embed=embed, view=view)
 
 @bot.tree.command(name="상담종료", description="상담 종료 및 로그 저장")
 async def close_ticket(interaction):
