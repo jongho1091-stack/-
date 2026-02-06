@@ -157,10 +157,18 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
 
 class RoleSelectView(discord.ui.View):
     def __init__(self): super().__init__(timeout=60)
+    
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
-    async def select_role(self, interaction, select): await interaction.response.send_modal(RecruitModal(select.values[0]))
+    async def select_role(self, interaction: discord.Interaction, select: discord.ui.Select):
+        # 모달이 뜨기 전에 '본인만 볼 수 있는 설정 메시지'를 삭제합니다.
+        await interaction.message.delete()
+        await interaction.response.send_modal(RecruitModal(select.values[0]))
+        
     @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
-    async def no_mention(self, interaction, button): await interaction.response.send_modal(RecruitModal(None))
+    async def no_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 버튼 클릭 시에도 동일하게 삭제합니다.
+        await interaction.message.delete()
+        await interaction.response.send_modal(RecruitModal(None))
 
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
