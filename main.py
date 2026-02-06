@@ -119,12 +119,19 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         placeholder='ex: 2026-02-07-21:00 / 이 형식으로 입력 (24시간제)'
     )
 
-    def __init__(self, role=None):
+    def __init__(self, role=None, setup_interaction=None):
         super().__init__()
         self.role = role
+        self.setup_interaction = setup_interaction # 설정 메시지 인계
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        
+        # [핵심] 모달 제출 시점에 설정 메시지를 강제로 지웁니다.
+        if self.setup_interaction:
+            try: await self.setup_interaction.delete_original_response()
+            except: pass
+
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
         target_dt = None
@@ -160,17 +167,12 @@ class RoleSelectView(discord.ui.View):
     
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.Select):
-        # 상호작용 실패 방지: 모달을 먼저 보내고 메시지 삭제
-        await interaction.response.send_modal(RecruitModal(select.values[0]))
-        try: await interaction.message.delete()
-        except: pass
+        # 상호작용을 보존하면서 모달에 원래 interaction을 넘깁니다.
+        await interaction.response.send_modal(RecruitModal(select.values[0], setup_interaction=interaction))
         
     @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
     async def no_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 상호작용 실패 방지: 모달을 먼저 보내고 메시지 삭제
-        await interaction.response.send_modal(RecruitModal(None))
-        try: await interaction.message.delete()
-        except: pass
+        await interaction.response.send_modal(RecruitModal(None, setup_interaction=interaction))
 
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
@@ -180,6 +182,7 @@ bot = MyBot()
 
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
 async def recruit(interaction: discord.Interaction):
+    # epemeral=True 메시지는 delete_original_response()로 지워야 합니다.
     await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=True)
 
 @bot.tree.command(name="티켓설정", description="레기온 티켓 시스템을 설정합니다.")
