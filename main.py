@@ -15,7 +15,7 @@ def home(): return "Bot is alive!"
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- 1. 레이드 모집 뷰 (전체 공개용) ---
+# --- 1. 레이드 모집 뷰 ---
 class RaidView(discord.ui.View):
     def __init__(self, title, time, limit, end_dt, author):
         super().__init__(timeout=None)
@@ -84,35 +84,12 @@ class RaidView(discord.ui.View):
             if mentions: await message.reply(f"{mentions}\n🏁 **'{self.title}' 모집이 종료되었습니다!**")
         except: pass
 
-# --- 2. 레기온 티켓 기능 (동일) ---
-class TicketView(discord.ui.View):
-    def __init__(self, admin_role_id, category_name, log_channel_id):
-        super().__init__(timeout=None)
-        self.admin_role_id, self.category_name, self.log_channel_id = admin_role_id, category_name, log_channel_id
-
-    async def create_ticket(self, interaction, type_label):
-        guild, user = interaction.guild, interaction.user
-        admin_role = guild.get_role(self.admin_role_id)
-        category = discord.utils.get(guild.categories, name=self.category_name)
-        if not category:
-            overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), admin_role: discord.PermissionOverwrite(read_messages=True)}
-            category = await guild.create_category(self.category_name, overwrites=overwrites)
-        ticket_overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), user: discord.PermissionOverwrite(read_messages=True, send_messages=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)}
-        channel = await guild.create_text_channel(name=f"{type_label}-{user.display_name}", category=category, overwrites=ticket_overwrites)
-        embed = discord.Embed(title=f"🎫 레기온 {type_label} 접수", description=f"안녕하세요 {user.mention}님!\n운영진이 확인 중입니다.\n\n💡 상담 종료: `/상담종료`", color=0x3498db)
-        embed.set_footer(text=f"ID: {self.log_channel_id}")
-        await channel.send(content=f"{user.mention} | {admin_role.mention}", embed=embed)
-        await interaction.response.send_message(f"✅ 채널 생성: {channel.mention}", ephemeral=True)
-
-# --- 3. 모달 및 모집 설정 로직 ---
+# --- 2. 모달 및 모집 설정 로직 ---
 class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(ex: 뿔암 / 정복 / 일반)')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='(ex: 26년 3월 13일 21시)')
     limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (ex: 6)')
-    dur_in = discord.ui.TextInput(
-        label='모집 마감 시간', 
-        placeholder='ex: 2026-02-07-21:00'
-    )
+    dur_in = discord.ui.TextInput(label='모집 마감 시간', placeholder='ex: 2026-02-07-21:00')
 
     def __init__(self, role=None, setup_interaction=None):
         super().__init__()
@@ -120,19 +97,15 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         self.setup_interaction = setup_interaction
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        
-        # [핵심 변경] 삭제(delete)를 하지 않고 문구 수정만 해서 꼬리표를 방지합니다.
+        # 1. 설정창 즉시 삭제 (일반 메시지라 삭제 시 꼬리표 안 남음)
         if self.setup_interaction:
-            try:
-                user_mention = self.setup_interaction.user.mention
-                await self.setup_interaction.edit_original_response(
-                    content=f"✅ {user_mention}께서 모집 작성을 완료하였습니다.", 
-                    view=None
-                )
+            try: await self.setup_interaction.delete_original_response()
             except: pass
+        
+        # interaction 응답 처리 (ephemeral로 하여 본인에게만 시스템 응답 알림)
+        await interaction.response.defer(ephemeral=True)
 
-        # 모집글 생성 로직
+        # 2. 날짜 및 데이터 계산
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
         target_dt = None
@@ -157,10 +130,17 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
         limit = int(l_str) if l_str else 6
         
-        view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
-        ment = self.role.mention if self.role else ""
-        sent_msg = await interaction.followup.send(content=f"{ment} 🌲 **모집 시작!**", embed=view.get_embed(), view=view)
+        # 3. [아이디어 반영] 완료 문구 + 태그 통합
+        user_mention = interaction.user.mention
+        role_mention = self.role.mention if self.role else ""
+        # 상단 텍스트 구성
+        complete_msg = f"✅ {user_mention}께서 모집 작성을 완료하였습니다.\n{role_mention} 🌲 **모집 시작!**"
         
+        view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
+        # followup으로 진짜 모집글 전송
+        sent_msg = await interaction.followup.send(content=complete_msg, embed=view.get_embed(), view=view)
+        
+        # 마감 타이머
         async def timer():
             wait = (target_dt - (datetime.utcnow() + timedelta(hours=9))).total_seconds()
             await asyncio.sleep(max(0, wait)); await view.close_raid(sent_msg)
@@ -185,7 +165,8 @@ bot = MyBot()
 
 @bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
 async def recruit(interaction: discord.Interaction):
-    await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=True)
+    # 모두가 볼 수 있게 설정하여 삭제 시 꼬리표 방지 (ephemeral=False)
+    await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=False)
 
 keep_alive()
 bot.run(os.getenv('TOKEN'))
