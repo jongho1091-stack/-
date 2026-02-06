@@ -36,12 +36,10 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # 참여 취소 버튼
         leave_btn = discord.ui.Button(label="참여 취소", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
 
-        # ✅ 길드장님 최종 요청: 라벨 수정 "모집 마감 / 작성자 전용"
         close_btn = discord.ui.Button(label="모집 마감 / 작성자 전용", style=discord.ButtonStyle.danger, emoji="🛑", custom_id="force_close")
         close_btn.callback = self.force_close_callback
         self.add_item(close_btn)
@@ -51,7 +49,6 @@ class RaidView(discord.ui.View):
         color = 0x5865F2 if not closed else 0x99AAB5
         now = datetime.utcnow() + timedelta(hours=9)
         display_time = self.end_time.strftime('%m/%d %H:%M') if self.end_time.date() > now.date() else self.end_time.strftime('%H:%M')
-        # ✅ '께서' 앞 공백 한 칸 유지
         desc = (f"**👤 모집자: {self.author.display_name}**\n━━━━━━━━━━━━━━━━━━━━\n"
                 f"📅 **출발 시간:** {self.time}\n👥 **정원:** {self.limit}명 (현재 {curr}명)\n⏰ **모집 마감:** {display_time} 까지")
         embed = discord.Embed(title=f"⚔️ {self.title}{' (모집 종료)' if closed else ''}", description=desc, color=color)
@@ -90,14 +87,12 @@ class RaidView(discord.ui.View):
         if interaction.user.id in self.participants: self.participants.remove(interaction.user.id)
         if removed:
             try:
-                # ✅ 'get off' 알림 유지
                 alert = await interaction.channel.send(f"⚪ {self.author.mention}님, **{name}** 참여 취소 (get off)")
                 await alert.delete()
             except: pass
         await interaction.response.edit_message(embed=self.get_embed())
 
     async def force_close_callback(self, interaction: discord.Interaction):
-        # ✅ 보안 로직: 작성자 본인 확인
         if interaction.user.id != self.author.id:
             return await interaction.response.send_message("❌ 작성자만 마감할 수 있습니다!", ephemeral=True)
         await interaction.response.send_message("🏁 모집을 조기 마감합니다.", ephemeral=True)
@@ -134,7 +129,6 @@ class TicketView(discord.ui.View):
 
         def check(m): return m.channel == channel and m.author.id == user.id
         try:
-            # ✅ 상담 채널에만 적용되는 3분 자동 삭제 로직
             await interaction.client.wait_for('message', check=check, timeout=180.0)
         except asyncio.TimeoutError:
             await channel.delete(reason="최초 3분간 문의자 응답 없음")
@@ -144,13 +138,19 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="🚨 신고하기", style=discord.ButtonStyle.danger, custom_id="report")
     async def report(self, interaction, button): await self.create_ticket(interaction, "신고")
 
-# --- 3. 모집 모달 및 역할 선택 ---
+# --- 3. 모집 설정 뷰 (버튼 복구) ---
 class RoleSelectView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+    
     @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
     async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         await interaction.response.send_modal(RecruitModal(role=select.values[0], setup_interaction=interaction))
+
+    # ✅ [알림 없이 작성하기] 버튼 복구
+    @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
+    async def no_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RecruitModal(role=None, setup_interaction=interaction))
 
 class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(ex: 뿔암 / 정복 / 일반)')
