@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from flask import Flask
 from threading import Thread
 
-# --- Render 가동용 웹 서버 (24시간 유지용) ---
+# --- Render 가동용 웹 서버 ---
 app = Flask('')
 @app.route('/')
 def home(): return "Bot is alive!"
@@ -36,7 +36,7 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # [2025-08-22] 캐릭터 변경 시 "get off" 사용 지침 반영
+        # [2025-08-22] 캐릭터 변경 지침 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -113,11 +113,10 @@ class TicketView(discord.ui.View):
 class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     title_in = discord.ui.TextInput(label='제목', placeholder='(예시: 뿔암 / 정복 / 일반)')
     time_in = discord.ui.TextInput(label='출발 시간', placeholder='(예시: 23:00 출발)')
-    limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (예: 6)', default='6')
+    limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (예: 6)')
     dur_in = discord.ui.TextInput(
         label='모집 마감 시간 (아래 예시처럼 작성)', 
-        placeholder='2026-02-07 21:00 형식으로 입력 (24시간제)', 
-        default='30'
+        placeholder='2026-02-07 21:00 형식으로 입력 (24시간제)'
     )
 
     def __init__(self, role=None):
