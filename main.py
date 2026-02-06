@@ -36,6 +36,7 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
+        # [2025-08-22] 캐릭터 변경 시 "get off" 사용 지침 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -127,7 +128,6 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
         target_dt = None
-        # 하이픈 포함 모든 숫자 추출 로직
         nums = re.findall(r'\d+', val)
         if len(nums) >= 4:
             try:
@@ -188,6 +188,14 @@ async def close_ticket(interaction: discord.Interaction):
     await interaction.response.send_message("💾 로그 저장 중...", ephemeral=True)
     log_ch = None
     async for msg in interaction.channel.history(oldest_first=True, limit=1):
-        if msg.embeds: log_ch = interaction.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
+        if msg.embeds:
+            try: log_ch = interaction.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
+            except: pass
     history = [f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}" async for m in interaction.channel.history(limit=None, oldest_first=True)]
-    with open("log.txt", "w", encoding="utf-8") as f: f.write("\
+    with open("log.txt", "w", encoding="utf-8") as f: f.write("\n".join(history))
+    if log_ch: await log_ch.send(f"📂 **종료 기록: {interaction.channel.name}**", file=discord.File("log.txt"))
+    if os.path.exists("log.txt"): os.remove("log.txt")
+    await asyncio.sleep(3); await interaction.channel.delete()
+
+keep_alive()
+bot.run(os.getenv('TOKEN'))
