@@ -192,7 +192,8 @@ async def close_ticket(interaction: discord.Interaction):
             try: log_ch = interaction.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
             except: pass
     history = [f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}" async for m in interaction.channel.history(limit=None, oldest_first=True)]
-    with open("log.txt", "w", encoding="utf-8") as f: f.write("\n".join(history))
+    log_content = "\n".join(history)
+    with open("log.txt", "w", encoding="utf-8") as f: f.write(log_content)
     if log_ch: await log_ch.send(f"📂 **종료 기록: {interaction.channel.name}**", file=discord.File("log.txt"))
     if os.path.exists("log.txt"): os.remove("log.txt")
     await asyncio.sleep(3); await interaction.channel.delete()
