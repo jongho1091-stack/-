@@ -36,7 +36,6 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # [2025-08-22] 캐릭터 변경 시 "get off" 사용 지침 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -116,7 +115,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
     limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (ex: 6)')
     dur_in = discord.ui.TextInput(
         label='모집 마감 시간 (반드시 아래 예시처럼 작성)', 
-        placeholder='ex: 2026-02-07 21:00 / 이 형식으로 입력 (24시간제)'
+        placeholder='ex: 2026-02-07-21:00 / 이 형식으로 입력 (24시간제)'
     )
 
     def __init__(self, role=None):
@@ -128,6 +127,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
         now = datetime.utcnow() + timedelta(hours=9)
         val = self.dur_in.value.strip()
         target_dt = None
+        # 하이픈 포함 모든 숫자 추출 로직
         nums = re.findall(r'\d+', val)
         if len(nums) >= 4:
             try:
@@ -136,7 +136,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
                 minute = int(nums[4]) if len(nums) >= 5 else 0
                 target_dt = datetime(year, month, day, hour, minute)
             except: pass
-        elif ':' in val or len(nums) == 2:
+        elif ':' in val or '-' in val or len(nums) == 2:
             try:
                 h, m = map(int, nums[:2])
                 target_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -190,10 +190,4 @@ async def close_ticket(interaction: discord.Interaction):
     async for msg in interaction.channel.history(oldest_first=True, limit=1):
         if msg.embeds: log_ch = interaction.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
     history = [f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}" async for m in interaction.channel.history(limit=None, oldest_first=True)]
-    with open("log.txt", "w", encoding="utf-8") as f: f.write("\n".join(history))
-    if log_ch: await log_ch.send(f"📂 **종료 기록: {interaction.channel.name}**", file=discord.File("log.txt"))
-    os.remove("log.txt")
-    await asyncio.sleep(3); await interaction.channel.delete()
-
-keep_alive()
-bot.run(os.getenv('TOKEN'))
+    with open("log.txt", "w", encoding="utf-8") as f: f.write("\
