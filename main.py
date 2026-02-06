@@ -8,19 +8,12 @@ from datetime import datetime, timedelta
 from flask import Flask
 from threading import Thread
 
-# --- Render 24시간 가동을 위한 웹 서버 설정 ---
+# --- Render 가동용 웹 서버 (24시간 유지용) ---
 app = Flask('')
-
 @app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+def home(): return "Bot is alive!"
+def run(): app.run(host='0.0.0.0', port=8080)
+def keep_alive(): Thread(target=run).start()
 
 # --- 1. 레이드 모집 뷰 ---
 class RaidView(discord.ui.View):
@@ -43,7 +36,7 @@ class RaidView(discord.ui.View):
             btn.callback = self.button_callback
             self.add_item(btn)
         
-        # [2025-08-22] Character change 시 "get off" 사용
+        # [2025-08-22] 캐릭터 변경 시 "get off" 사용 지침 반영
         leave_btn = discord.ui.Button(label="취소 (get off)", style=discord.ButtonStyle.gray, custom_id="leave")
         leave_btn.callback = self.leave_callback
         self.add_item(leave_btn)
@@ -52,11 +45,7 @@ class RaidView(discord.ui.View):
         curr = sum(len(self.roster[r]) for r in self.roles)
         color = 0x5865F2 if not closed else 0x99AAB5
         now = datetime.utcnow() + timedelta(hours=9)
-        
-        display_time = self.end_time.strftime('%H:%M')
-        if self.end_time.date() > now.date():
-            display_time = self.end_time.strftime('%m/%d %H:%M')
-
+        display_time = self.end_time.strftime('%m/%d %H:%M') if self.end_time.date() > now.date() else self.end_time.strftime('%H:%M')
         desc = (f"**👤 모집자: {self.author.display_name}**\n━━━━━━━━━━━━━━━━━━━━\n"
                 f"📅 **출발 시간:** {self.time}\n👥 **정원:** {self.limit}명 (현재 {curr}명)\n⏰ **모집 마감:** {display_time} 까지")
         embed = discord.Embed(title=f"⚔️ {self.title}{' (모집 종료)' if closed else ''}", description=desc, color=color)
@@ -95,51 +84,94 @@ class RaidView(discord.ui.View):
             if mentions: await message.reply(f"{mentions}\n🏁 **'{self.title}' 모집이 종료되었습니다!**")
         except: pass
 
-# --- 2. 레기온 티켓 기능 (건의/신고) ---
+# --- 2. 레기온 티켓 기능 ---
 class TicketView(discord.ui.View):
     def __init__(self, admin_role_id, category_name, log_channel_id):
         super().__init__(timeout=None)
-        self.admin_role_id = admin_role_id
-        self.category_name = category_name
-        self.log_channel_id = log_channel_id
+        self.admin_role_id, self.category_name, self.log_channel_id = admin_role_id, category_name, log_channel_id
 
     async def create_ticket(self, interaction, type_label):
-        guild = interaction.guild
-        user = interaction.user
+        guild, user = interaction.guild, interaction.user
         admin_role = guild.get_role(self.admin_role_id)
-        
         category = discord.utils.get(guild.categories, name=self.category_name)
         if not category:
             overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), admin_role: discord.PermissionOverwrite(read_messages=True)}
             category = await guild.create_category(self.category_name, overwrites=overwrites)
-
-        ticket_overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-        }
+        ticket_overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), user: discord.PermissionOverwrite(read_messages=True, send_messages=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)}
         channel = await guild.create_text_channel(name=f"{type_label}-{user.display_name}", category=category, overwrites=ticket_overwrites)
-
-        embed = discord.Embed(title=f"🎫 레기온 {type_label} 접수", 
-                              description=f"안녕하세요 {user.mention}님!\n현재 **레기온 운영진**이 내용을 확인하고 있습니다.\n내용을 남겨주시면 곧 답변드리겠습니다.\n\n💡 상담이 끝나면 운영진이 `/상담종료` 명령어로 마무리합니다.", color=0x3498db)
+        embed = discord.Embed(title=f"🎫 레기온 {type_label} 접수", description=f"안녕하세요 {user.mention}님!\n운영진이 확인 중입니다.\n\n💡 상담 종료: `/상담종료`", color=0x3498db)
         embed.set_footer(text=f"ID: {self.log_channel_id}")
         await channel.send(content=f"{user.mention} | {admin_role.mention}", embed=embed)
-        await interaction.response.send_message(f"✅ {type_label} 채널이 생성되었습니다: {channel.mention}", ephemeral=True)
+        await interaction.response.send_message(f"✅ 채널 생성: {channel.mention}", ephemeral=True)
 
     @discord.ui.button(label="📝 건의하기", style=discord.ButtonStyle.primary, custom_id="suggest")
     async def suggest(self, interaction, button): await self.create_ticket(interaction, "건의")
     @discord.ui.button(label="🚨 신고하기", style=discord.ButtonStyle.danger, custom_id="report")
     async def report(self, interaction, button): await self.create_ticket(interaction, "신고")
 
-# --- 3. 봇 클래스 및 명령어 ---
-class MyBot(commands.Bot):
-    def __init__(self):
-        super().__init__(command_prefix="!", intents=discord.Intents.all())
+# --- 3. 모달 및 명령어 ---
+class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
+    title_in = discord.ui.TextInput(label='제목', placeholder='(예시: 뿔암 / 정복 / 일반)')
+    time_in = discord.ui.TextInput(label='출발 시간', placeholder='(예시: 23:00 출발)')
+    limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (예: 6)', default='6')
+    dur_in = discord.ui.TextInput(
+        label='모집 마감 시간 (아래 예시처럼 작성)', 
+        placeholder='2026-02-07 21:00 형식으로 입력 (24시간제)', 
+        default='30'
+    )
 
-    async def setup_hook(self):
-        await self.tree.sync()
+    def __init__(self, role=None):
+        super().__init__()
+        self.role = role
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        now = datetime.utcnow() + timedelta(hours=9)
+        val = self.dur_in.value.strip()
+        target_dt = None
+        nums = re.findall(r'\d+', val)
+        if len(nums) >= 4:
+            try:
+                year = int(nums[0]); year = year + 2000 if year < 100 else year
+                month, day, hour = int(nums[1]), int(nums[2]), int(nums[3])
+                minute = int(nums[4]) if len(nums) >= 5 else 0
+                target_dt = datetime(year, month, day, hour, minute)
+            except: pass
+        elif ':' in val or len(nums) == 2:
+            try:
+                h, m = map(int, nums[:2])
+                target_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                if target_dt < now: target_dt += timedelta(days=1)
+            except: pass
+        if not target_dt:
+            try: target_dt = now + timedelta(minutes=int(re.sub(r'[^0-9]', '', val)))
+            except: target_dt = now + timedelta(minutes=30)
+        l_str = re.sub(r'[^0-9]', '', self.limit_in.value)
+        limit = int(l_str) if l_str else 6
+        view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
+        ment = self.role.mention if self.role else ""
+        sent_msg = await interaction.followup.send(content=f"{ment} 🌲 **모집 시작!**", embed=view.get_embed(), view=view)
+        async def timer():
+            wait = (target_dt - (datetime.utcnow() + timedelta(hours=9))).total_seconds()
+            await asyncio.sleep(max(0, wait)); await view.close_raid(sent_msg)
+        asyncio.create_task(timer())
+
+class RoleSelectView(discord.ui.View):
+    def __init__(self): super().__init__(timeout=60)
+    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
+    async def select_role(self, interaction, select): await interaction.response.send_modal(RecruitModal(select.values[0]))
+    @discord.ui.button(label="알림 없이 작성하기", style=discord.ButtonStyle.gray)
+    async def no_mention(self, interaction, button): await interaction.response.send_modal(RecruitModal(None))
+
+class MyBot(commands.Bot):
+    def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all())
+    async def setup_hook(self): await self.tree.sync()
 
 bot = MyBot()
+
+@bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
+async def recruit(interaction: discord.Interaction):
+    await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=True)
 
 @bot.tree.command(name="티켓설정", description="레기온 티켓 시스템을 설정합니다.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -147,84 +179,22 @@ async def ticket_setup(interaction: discord.Interaction, 관리자역할: discor
     guild = interaction.guild
     overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), 관리자역할: discord.PermissionOverwrite(read_messages=True)}
     log_ch = await guild.create_text_channel(name=로그채널명, overwrites=overwrites)
-    
     view = TicketView(관리자역할.id, 상담카테고리명, log_ch.id)
-    embed = discord.Embed(
-        title="📢 레기온 건의 및 신고 접수", 
-        description=(
-            f"우리 **레기온**을 위한 소중한 의견을 들려주세요.\n"
-            f"상담은 운영진과 본인만 볼 수 있는 비밀 채널에서 진행됩니다.\n\n"
-            f"**📝 건의하기**: 운영 및 규칙 관련 의견\n"
-            f"**🚨 신고하기**: 비매너 유저 및 규칙 위반 제보\n\n"
-            f"⚠️ **주의사항**\n"
-            f"**장난성 건의 및 신고는 제재 대상이 될 수 있습니다.**"
-        ), 
-        color=0x2f3136
-    )
+    embed = discord.Embed(title="📢 레기온 건의 및 신고 접수", description="상담은 운영진과 본인만 볼 수 있는 비밀 채널에서 진행됩니다.", color=0x2f3136)
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="상담종료", description="상담 종료 후 로그 저장 및 채널 삭제")
+@bot.tree.command(name="상담종료", description="상담 종료 및 로그 저장")
 async def close_ticket(interaction: discord.Interaction):
-    if not isinstance(interaction.channel, discord.TextChannel) or "-" not in interaction.channel.name:
-        return await interaction.response.send_message("❌ 상담 채널에서만 사용 가능합니다.", ephemeral=True)
-
-    await interaction.response.send_message("💾 로그를 생성하고 채널을 닫는 중입니다...", ephemeral=True)
-    
+    if "-" not in interaction.channel.name: return await interaction.response.send_message("❌ 상담 채널이 아닙니다.", ephemeral=True)
+    await interaction.response.send_message("💾 로그 저장 중...", ephemeral=True)
     log_ch = None
     async for msg in interaction.channel.history(oldest_first=True, limit=1):
-        if msg.embeds and msg.embeds[0].footer.text:
-            try: log_ch = interaction.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
-            except: pass
-    
-    history = []
-    async for message in interaction.channel.history(limit=None, oldest_first=True):
-        history.append(f"[{message.created_at.strftime('%Y-%m-%d %H:%M')}] {message.author.display_name}: {message.content}")
-    
-    log_content = "\n".join(history)
-    file_path = f"log_{interaction.channel.name}.txt"
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(log_content)
-    
-    if log_ch:
-        await log_ch.send(f"📂 **상담 종료 기록: {interaction.channel.name}**", file=discord.File(file_path))
-    
-    os.remove(file_path)
-    await asyncio.sleep(3)
-    await interaction.channel.delete()
+        if msg.embeds: log_ch = interaction.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
+    history = [f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}" async for m in interaction.channel.history(limit=None, oldest_first=True)]
+    with open("log.txt", "w", encoding="utf-8") as f: f.write("\n".join(history))
+    if log_ch: await log_ch.send(f"📂 **종료 기록: {interaction.channel.name}**", file=discord.File("log.txt"))
+    os.remove("log.txt")
+    await asyncio.sleep(3); await interaction.channel.delete()
 
-# --- 레이드 모집 관련 (기존 로직) ---
-class RecruitModal(discord.ui.Modal, title='📝 레기온 레이드 모집'):
-    title_in = discord.ui.TextInput(label='제목', placeholder='(예시: 뿔암 / 정복 / 일반)')
-    time_in = discord.ui.TextInput(label='출발 시간', placeholder='(예시: 23:00 출발)')
-    limit_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력 (예: 6)')
-    dur_in = discord.ui.TextInput(label='마감시간 (예: 21:00 / 1시간 뒤)')
-
-    def __init__(self, role):
-        super().__init__()
-        self.role = role
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        now = datetime.utcnow() + timedelta(hours=9)
-        target_dt = now + timedelta(minutes=30)
-        l_str = re.sub(r'[^0-9]', '', self.limit_in.value); limit = int(l_str) if l_str else 6
-        view = RaidView(self.title_in.value, self.time_in.value, limit, target_dt, interaction.user)
-        ment = self.role.mention if self.role else ""
-        sent_msg = await interaction.followup.send(content=f"{ment} 🌲 **모집 시작!**", embed=view.get_embed(), view=view)
-        async def timer():
-            await asyncio.sleep(max(0, (target_dt - now).total_seconds()))
-            await view.close_raid(sent_msg)
-        asyncio.create_task(timer())
-
-class RoleSelectView(discord.ui.View):
-    def __init__(self): super().__init__(timeout=60)
-    @discord.ui.select(cls=discord.ui.RoleSelect, placeholder="📣 알림 보낼 역할을 선택하세요")
-    async def select_role(self, interaction, select): await interaction.response.send_modal(RecruitModal(select.values[0]))
-
-@bot.tree.command(name="모집", description="레이드 모집글을 작성합니다.")
-async def recruit(interaction: discord.Interaction):
-    await interaction.response.send_message("모집 설정을 시작합니다.", view=RoleSelectView(), ephemeral=True)
-
-# 실행
 keep_alive()
 bot.run(os.getenv('TOKEN'))
