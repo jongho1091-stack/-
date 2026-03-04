@@ -107,7 +107,6 @@ class RaidView(discord.ui.View):
         except: pass
 
 class RaidEntryModal(discord.ui.Modal, title='⚔️ 참석 정보'):
-    # [수정] 길드장님이 말씀하신 완벽한 가이드 문구 복구
     job = discord.ui.TextInput(label='직업', placeholder='(줄임말 없이 작성)')
     char = discord.ui.TextInput(label='캐릭터명', placeholder='(ex.토끼공듀)')
     power = discord.ui.TextInput(label='전투력', placeholder='(ex.12+)')
@@ -116,7 +115,6 @@ class RaidEntryModal(discord.ui.Modal, title='⚔️ 참석 정보'):
     async def on_submit(self, i):
         self.rv.roster[i.user.id] = f"{self.job.value} / {self.char.value} / {self.power.value}"
         await i.response.edit_message(embed=self.rv.get_embed())
-        # 3초 멘션 알림
         notif = await i.channel.send(f"🔔 {self.rv.author.mention}님, **{i.user.display_name}**님이 참여! ({self.job.value}/{self.power.value})")
         await notif.delete(delay=3)
 
@@ -217,6 +215,15 @@ async def close_ticket(i):
 async def create_setup(i, 채널: discord.TextChannel, 내용: str):
     msg = await 채널.send(content=내용); bot.db["setup_msg_id"], bot.db["setup_chan_id"] = msg.id, 채널.id
     bot.db["job_roles"] = {}; save_db(bot.db); await i.response.send_message("✅ 생성 완료", ephemeral=True)
+
+@bot.tree.command(name="직업설정판_문구수정")
+async def edit_setup_text(i, 수정할내용: str):
+    if not bot.db.get("setup_msg_id"): return await i.response.send_message("❌ 설정판 없음", ephemeral=True)
+    try:
+        chan = bot.get_channel(bot.db["setup_chan_id"]); msg = await chan.fetch_message(bot.db["setup_msg_id"])
+        await msg.edit(content=수정할내용, view=DynamicJobView(bot.db["job_roles"]))
+        await i.response.send_message("✅ 문구 수정 완료", ephemeral=True)
+    except: await i.response.send_message("❌ 수정 실패", ephemeral=True)
 
 @bot.tree.command(name="직업역할_추가")
 async def add_job(i, 이모지: str, 역할: discord.Role):
