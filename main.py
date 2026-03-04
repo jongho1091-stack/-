@@ -112,7 +112,7 @@ class RaidView(discord.ui.View):
             except: pass
             await i.response.edit_message(embed=self.get_embed())
         else: await i.response.send_message("참여 중이 아닙니다.", ephemeral=True)
-    @discord.ui.button(label="모집 마감 / 작성자 전용", style=discord.ButtonStyle.danger, emoji="🛑", custom_id="force_close")
+    @discord.ui.button(label="모집 마감", style=discord.ButtonStyle.danger, emoji="🛑", custom_id="force_close")
     async def close(self, i, b):
         if i.user.id != self.author.id: return await i.response.send_message("❌ 작성자만 마감할 수 있습니다!", ephemeral=True)
         await i.response.defer(ephemeral=True); await self.close_raid(i.message)
@@ -138,7 +138,7 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집'):
     t_in = discord.ui.TextInput(label='제목', placeholder='ㅇㅇ 4인 파티')
     tm_in = discord.ui.TextInput(label='출발 시간', placeholder='오늘 저녁 11시')
     l_in = discord.ui.TextInput(label='인원', placeholder='숫자만 입력')
-    d_in = discord.ui.TextInput(label='모집 마감 시간', placeholder='2026-03-04-21:00 / 반드시 이 형식으로 적을 것')
+    d_in = discord.ui.TextInput(label='모집 마감 시간', placeholder='2026-03-04-21:00 / 형식 엄수')
     def __init__(self, role=None, setup_i=None): super().__init__(); self.role, self.setup_i = role, setup_i
     async def on_submit(self, i):
         await i.response.defer(ephemeral=True); val = self.d_in.value.strip(); target_dt = None; nums = re.findall(r'\d+', val)
@@ -169,7 +169,7 @@ class TicketView(discord.ui.View):
         admin_role = guild.get_role(self.admin_role_id)
         over = {guild.default_role: discord.PermissionOverwrite(read_messages=False), member: discord.PermissionOverwrite(read_messages=True, send_messages=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)}
         ticket_ch = await guild.create_text_channel(name=f"{prefix}-{member.display_name}", category=category, overwrites=over)
-        emb = discord.Embed(title=f"📩 {prefix} 접수", description=f"{member.mention}님, 상담 내용을 남겨주세요.\n\n⚠️ **3분간 무응답 시 자동 폭파(get off)**\n종료 시 `/상담종료` 입력", color=0x2f3136)
+        emb = discord.Embed(title=f"📩 {prefix} 접수", description=f"{member.mention}님, 내용을 남겨주세요.\n\n⚠️ **3분간 무응답 시 자동 폭파(get off)**\n종료 시 `/상담종료` 입력", color=0x2f3136)
         emb.set_footer(text=f"로그채널ID: {self.log_ch_id}")
         await ticket_ch.send(embed=emb)
         await i.response.send_message(f"✅ 티켓 생성됨! {ticket_ch.mention}", ephemeral=True)
@@ -179,12 +179,12 @@ class TicketView(discord.ui.View):
             except asyncio.TimeoutError:
                 await ticket_ch.send("⏰ 3분간 응답이 없어 자동 종료(get off)합니다.")
                 await archive_and_delete(ticket_ch, self.log_ch_id); break
-    @discord.ui.button(label="문의/건의하기", style=discord.ButtonStyle.success, emoji="🙋", custom_id="btn_inquiry_f")
+    @discord.ui.button(label="문의/건의하기", style=discord.ButtonStyle.success, emoji="🙋", custom_id="btn_inquiry_final_v1")
     async def inquiry(self, i, b): await self.create_ticket(i, "문의-건의")
-    @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, emoji="🚨", custom_id="btn_report_f")
+    @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, emoji="🚨", custom_id="btn_report_final_v1")
     async def report(self, i, b): await self.create_ticket(i, "신고")
 
-# --- 봇 클래스 ---
+# --- 봇 설정 및 실행 ---
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all()); self.db = load_db()
     async def setup_hook(self): 
@@ -201,7 +201,6 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# --- 명령어 모음 ---
 @bot.tree.command(name="모집")
 async def recruit(i):
     class RoleSelectView(discord.ui.View):
@@ -217,10 +216,10 @@ async def set_auto_role(i, 역할: discord.Role):
     g_id = str(i.guild.id); bot.db.setdefault(g_id, {})["auto_role_id"] = 역할.id
     save_db(bot.db); await i.response.send_message(f"✅ 자동 역할: **{역할.name}**", ephemeral=True)
 
-@bot.tree.command(name="역할등록")  # <--- 명칭 수정 완료
-async def reg_role(i, 이모지:str, 역할명:str):
+@bot.tree.command(name="역할등록")
+async def reg_role_cmd(i, 이모지:str, 역할명:str):
     g_id = str(i.guild.id); bot.db.setdefault(g_id, {"job_roles": {}})["job_roles"][이모지] = 역할명
-    save_db(bot.db); await i.response.send_message(f"✅ 역할 등록 완료: {이모지} -> {역할명}", ephemeral=True)
+    save_db(bot.db); await i.response.send_message(f"✅ 등록 완료 (재시작 시 버튼 반영)", ephemeral=True)
 
 @bot.tree.command(name="역할설정")
 async def set_role(i, 문구:str):
@@ -240,7 +239,7 @@ async def ticket_setup(i, 관리자역할: discord.Role, 상담카테고리명: 
     log_ch = await i.guild.create_text_channel(name=로그채널명, overwrites={i.guild.default_role: discord.PermissionOverwrite(read_messages=False), 관리자역할: discord.PermissionOverwrite(read_messages=True)})
     g_id = str(i.guild.id); bot.db.setdefault(g_id, {})["ticket_settings"] = {"admin_role_id": 관리자역할.id, "category_name": 상담카테고리명, "log_ch_id": log_ch.id}
     save_db(bot.db); view = TicketView(관리자역할.id, 상담카테고리명, log_ch.id)
-    bot.add_view(view); await i.channel.send(embed=discord.Embed(title="📢 문의 및 신고 접수", description="아래 버튼을 눌러 티켓을 생성하세요.\n(3분 무응답 시 자동 종료)", color=0x2f3136), view=view)
+    bot.add_view(view); await i.channel.send(embed=discord.Embed(title="📢 문의 및 신고 접수", description="아래 버튼을 눌러 티켓을 생성하세요.", color=0x2f3136), view=view)
     await i.response.send_message("✅ 티켓 설정 완료!", ephemeral=True)
 
 @bot.tree.command(name="상담종료")
