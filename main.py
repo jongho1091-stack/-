@@ -186,4 +186,4 @@ async def setup_ticket(interaction, 내용: str, 관리역할: discord.Role):
     await interaction.response.send_message(f"✅ 티켓 설정 완료! (관리: {관리역할.name})", ephemeral=True)
 
 keep_alive()
-bot.run(os.getenv('TOKEN'))
+bot.run(os.environ.get('TOKEN'))
