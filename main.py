@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, UTC
 from flask import Flask
 from threading import Thread
 
-# --- Render 서버 유지용 ---
+# --- 서버 유지용 ---
 app = Flask('')
 @app.route('/')
 def home(): return "Bot is alive!"
@@ -41,7 +41,7 @@ async def archive_and_delete(channel, log_ch_id):
 
 # --- [역할 시스템] ---
 class NicknameModal(discord.ui.Modal, title='📝 별명 입력'):
-    name_input = discord.ui.TextInput(label='사용하실 별명을 입력해주세요', placeholder='(예: 토끼공듀)', min_length=1, max_length=20)
+    name_input = discord.ui.TextInput(label='사용하실 별명을 입력해주세요', placeholder='(ex.토끼공듀)', min_length=1, max_length=20)
     def __init__(self, emoji, role_name, job_roles):
         super().__init__(); self.emoji, self.role_name, self.job_roles = emoji, role_name, job_roles
     async def on_submit(self, i: discord.Interaction):
@@ -77,17 +77,21 @@ class RaidView(discord.ui.View):
         super().__init__(timeout=None)
         self.title, self.time, self.limit, self.end_time, self.author = title, time, limit, end_dt, author
         self.roster = {}; self.is_closed = False
-    @discord.ui.button(label="참석/변경", style=discord.ButtonStyle.primary, emoji="⚔️")
+    
+    @discord.ui.button(label="참여/변경하기", style=discord.ButtonStyle.primary, emoji="⚔️")
     async def join(self, i, b):
         if not self.is_closed: await i.response.send_modal(RaidEntryModal(self))
+        
     @discord.ui.button(label="참여 취소", style=discord.ButtonStyle.gray)
     async def leave(self, i, b):
         if i.user.id in self.roster:
             self.roster.pop(i.user.id); await i.response.edit_message(embed=self.get_embed())
             a = await i.channel.send(f"⚪ {i.user.display_name} 참여 취소 (get off)"); await a.delete(delay=3)
+            
     @discord.ui.button(label="모집 마감", style=discord.ButtonStyle.danger, emoji="🛑")
     async def close_btn(self, i, b):
         if i.user.id == self.author.id: await self.close_raid(i.message)
+        
     def get_embed(self, closed=False):
         curr = len(self.roster); color = 0x5865F2 if not closed else 0x99AAB5
         display_time = self.end_time.strftime('%m/%d %H:%M')
@@ -96,27 +100,31 @@ class RaidView(discord.ui.View):
         list_val = "\n".join([f"> {idx+1}. {info}" for idx, info in enumerate(self.roster.values())]) if self.roster else "> 인원 없음"
         embed.add_field(name="👥 참여 명단", value=list_val, inline=False)
         return embed
+        
     async def close_raid(self, message):
         self.is_closed = True; [setattr(item, 'disabled', True) for item in self.children]
         try: await message.edit(embed=self.get_embed(closed=True), view=self)
         except: pass
 
 class RaidEntryModal(discord.ui.Modal, title='⚔️ 참석 정보'):
-    job = discord.ui.TextInput(label='직업', placeholder='')
-    char = discord.ui.TextInput(label='캐릭터명', placeholder='')
+    # [수정] 길드장님이 말씀하신 완벽한 가이드 문구 복구
+    job = discord.ui.TextInput(label='직업', placeholder='(줄임말 없이 작성)')
+    char = discord.ui.TextInput(label='캐릭터명', placeholder='(ex.토끼공듀)')
+    power = discord.ui.TextInput(label='전투력', placeholder='(ex.12+)')
+
     def __init__(self, rv): super().__init__(); self.rv = rv
     async def on_submit(self, i):
-        self.rv.roster[i.user.id] = f"{self.job.value} / {self.char.value}"
+        self.rv.roster[i.user.id] = f"{self.job.value} / {self.char.value} / {self.power.value}"
         await i.response.edit_message(embed=self.rv.get_embed())
-        # [수정] 3초 뒤 자동 삭제되는 멘션 알림
-        notif = await i.channel.send(f"🔔 {self.rv.author.mention}님, **{i.user.display_name}**님이 참여했습니다! ({self.job.value})")
+        # 3초 멘션 알림
+        notif = await i.channel.send(f"🔔 {self.rv.author.mention}님, **{i.user.display_name}**님이 참여! ({self.job.value}/{self.power.value})")
         await notif.delete(delay=3)
 
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집'):
     t_in = discord.ui.TextInput(label='제목', placeholder='')
     tm_in = discord.ui.TextInput(label='출발 시간', placeholder='')
     l_in = discord.ui.TextInput(label='인원', placeholder='')
-    d_in = discord.ui.TextInput(label='모집 마감 시간', placeholder='2026-03-04-21:00 (양식 엄수)')
+    d_in = discord.ui.TextInput(label='모집 마감 시간', placeholder='2026-03-04-21:00')
     def __init__(self, role=None, setup_i=None): super().__init__(); self.role, self.setup_i = role, setup_i
     async def on_submit(self, i):
         await i.response.defer(ephemeral=True)
