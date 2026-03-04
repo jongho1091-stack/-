@@ -25,17 +25,22 @@ def load_db():
         except: pass
     return {"auto_role": None, "job_roles": {}, "setup_msg_id": None, "setup_chan_id": None, "ticket_settings": {}}
 
-# --- 티켓 로그 및 자동 삭제 로직 ---
+# --- [수정 완료] 티켓 로그 및 한글 깨짐 방지 로직 ---
 async def archive_and_delete(channel, log_ch_id):
     history = []
     async for m in channel.history(limit=None, oldest_first=True):
         history.append(f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}")
+    
     log_ch = channel.guild.get_channel(log_ch_id)
     if log_ch:
         file_path = f"log_{channel.id}.txt"
-        with open(file_path, "w", encoding="utf-8") as f: f.write("\n".join(history))
+        # [핵심 수정] utf-8-sig를 사용하여 윈도우 메모장에서 한글이 깨지지 않게 저장합니다.
+        with open(file_path, "w", encoding="utf-8-sig") as f: 
+            f.write("\n".join(history))
+        
         await log_ch.send(f"📂 **상담 기록: {channel.name}**", file=discord.File(file_path))
         if os.path.exists(file_path): os.remove(file_path)
+    
     await asyncio.sleep(3)
     try: await channel.delete()
     except: pass
