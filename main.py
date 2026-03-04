@@ -39,14 +39,17 @@ async def archive_and_delete(channel, log_ch_id):
     
     if os.path.exists(file_path): os.remove(file_path)
     await asyncio.sleep(3)
-    try: await channel.delete()
-    except: pass
+    try:
+        await channel.delete()
+    except:
+        pass
 
 # --- [역할 부여] 관련 기능 ---
 class NicknameModal(discord.ui.Modal, title='📝 별명 입력'):
     name_input = discord.ui.TextInput(label='사용하실 별명을 입력해주세요', placeholder='(예: 토끼공듀)', min_length=1, max_length=20)
     def __init__(self, emoji, role_name, job_roles):
-        super().__init__(); self.emoji, self.role_name, self.job_roles = emoji, role_name, job_roles
+        super().__init__()
+        self.emoji, self.role_name, self.job_roles = emoji, role_name, job_roles
     async def on_submit(self, i: discord.Interaction):
         await i.response.defer(ephemeral=True)
         guild, member = i.guild, i.user
@@ -59,8 +62,10 @@ class NicknameModal(discord.ui.Modal, title='📝 별명 입력'):
         if new_role: 
             try: await member.add_roles(new_role)
             except: pass
-        try: await member.edit(nick=f"{self.emoji}{self.name_input.value.strip()}"[:32])
-        except: pass
+        try:
+            await member.edit(nick=f"{self.emoji}{self.name_input.value.strip()}"[:32])
+        except:
+            pass
         await i.followup.send(f"✅ **{self.role_name}** 설정 완료!", ephemeral=True)
 
 class RoleAssignView(discord.ui.View):
@@ -179,9 +184,9 @@ class TicketView(discord.ui.View):
             except asyncio.TimeoutError:
                 await ticket_ch.send("⏰ 3분간 응답이 없어 자동 종료(get off)합니다.")
                 await archive_and_delete(ticket_ch, self.log_ch_id); break
-    @discord.ui.button(label="문의/건의하기", style=discord.ButtonStyle.success, emoji="🙋", custom_id="btn_inquiry_final_v1")
+    @discord.ui.button(label="문의/건의하기", style=discord.ButtonStyle.success, emoji="🙋", custom_id="btn_inquiry_final_v2")
     async def inquiry(self, i, b): await self.create_ticket(i, "문의-건의")
-    @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, emoji="🚨", custom_id="btn_report_final_v1")
+    @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, emoji="🚨", custom_id="btn_report_final_v2")
     async def report(self, i, b): await self.create_ticket(i, "신고")
 
 # --- 봇 설정 및 실행 ---
@@ -196,8 +201,12 @@ class MyBot(commands.Bot):
     async def on_member_join(self, m):
         r_id = self.db.get(str(m.guild.id), {}).get("auto_role_id")
         if r_id:
-            role = m.guild.get_role(r_id); try: await m.add_roles(role)
-            except: pass
+            role = m.guild.get_role(r_id)
+            if role:
+                try: 
+                    await m.add_roles(role)
+                except: 
+                    pass
 
 bot = MyBot()
 
