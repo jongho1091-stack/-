@@ -2,22 +2,21 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import re, os, asyncio, json
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone # UTC 대신 timezone 사용
 from flask import Flask
 from threading import Thread
 
-# --- 서버 유지용 (Render/Replit 24시간 구동용) ---
+# --- 서버 유지용 ---
 app = Flask('')
 @app.route('/')
 def home(): return "Bot is alive!"
 def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive(): Thread(target=run).start()
 
-# --- 데이터 저장 시스템 ---
+# --- 데이터 저장 ---
 DB_FILE = "guild_settings.json"
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f: 
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
 def load_db():
     if os.path.exists(DB_FILE):
         try:
@@ -25,105 +24,87 @@ def load_db():
         except: pass
     return {"auto_role": None, "job_roles": {}, "setup_msg_id": None, "setup_chan_id": None, "ticket_settings": {}}
 
-# --- [수정 완료] 티켓 로그 및 한글 깨짐 방지 로직 ---
+# --- 티켓 로그 및 삭제 (NotFound 에러 방지) ---
 async def archive_and_delete(channel, log_ch_id):
-    history = []
-    async for m in channel.history(limit=None, oldest_first=True):
-        history.append(f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}")
-    
-    log_ch = channel.guild.get_channel(log_ch_id)
-    if log_ch:
-        file_path = f"log_{channel.id}.txt"
-        # [핵심 수정] utf-8-sig를 사용하여 윈도우 메모장에서 한글이 깨지지 않게 저장합니다.
-        with open(file_path, "w", encoding="utf-8-sig") as f: 
-            f.write("\n".join(history))
+    if not channel: return
+    try:
+        history = []
+        async for m in channel.history(limit=None, oldest_first=True):
+            history.append(f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}")
         
-        await log_ch.send(f"📂 **상담 기록: {channel.name}**", file=discord.File(file_path))
-        if os.path.exists(file_path): os.remove(file_path)
+        log_ch = channel.guild.get_channel(log_ch_id)
+        if log_ch and history:
+            file_path = f"log_{channel.id}.txt"
+            with open(file_path, "w", encoding="utf-8-sig") as f: f.write("\n".join(history))
+            await log_ch.send(f"📂 **상담 기록: {channel.name}**", file=discord.File(file_path))
+            if os.path.exists(file_path): os.remove(file_path)
+    except Exception as e:
+        print(f"로그 저장 중 오류 발생: {e}")
     
-    await asyncio.sleep(3)
+    await asyncio.sleep(2)
     try: await channel.delete()
     except: pass
 
-# --- [역할 시스템] 1. 문구 수정용 팝업창 ---
+# --- [역할 시스템] 팝업 수정창 ---
 class EditSetupModal(discord.ui.Modal, title='📝 설정판 문구 수정'):
-    content_input = discord.ui.TextInput(
-        label='수정할 내용을 입력하세요 (마크다운 가능)',
-        style=discord.TextStyle.paragraph,
-        placeholder='**우리 길드 직업 설정**\n\n아래 버튼을 클릭해 직업을 선택하세요!',
-        required=True,
-        max_length=1500
-    )
+    content_input = discord.ui.TextInput(label='내용 (마크다운 가능)', style=discord.TextStyle.paragraph, required=True, max_length=1500)
     def __init__(self, msg, job_roles):
-        super().__init__()
-        self.msg, self.job_roles = msg, job_roles
+        super().__init__(); self.msg, self.job_roles = msg, job_roles
         self.content_input.default = msg.content
     async def on_submit(self, i: discord.Interaction):
         await self.msg.edit(content=self.content_input.value, view=DynamicJobView(self.job_roles))
-        await i.response.send_message("✅ 설정판 문구가 수정되었습니다!", ephemeral=True)
+        await i.response.send_message("✅ 수정 완료!", ephemeral=True)
 
-# --- [역할 시스템] 2. 별명 입력창 ---
 class NicknameModal(discord.ui.Modal, title='📝 별명 입력'):
-    name_input = discord.ui.TextInput(label='사용하실 별명을 입력해주세요', placeholder='(ex.토끼공듀)', min_length=1, max_length=20)
+    name_input = discord.ui.TextInput(label='별명 입력', placeholder='(ex.토끼공듀)', min_length=1, max_length=20)
     def __init__(self, emoji, role_name, job_roles):
         super().__init__(); self.emoji, self.role_name, self.job_roles = emoji, role_name, job_roles
-    async def on_submit(self, i: discord.Interaction):
+    async def on_submit(self, i):
         await i.response.defer(ephemeral=True)
-        guild, member = i.guild, i.user
-        all_job_names = list(self.job_roles.values())
-        to_remove = [r for r in member.roles if r.name in all_job_names]
-        if to_remove:
-            try: await member.remove_roles(*to_remove)
-            except: pass
-        new_role = discord.utils.get(guild.roles, name=self.role_name)
-        if new_role: await member.add_roles(new_role)
-        new_nick = f"{self.emoji}{self.name_input.value.strip()}"
-        try: await member.edit(nick=new_nick[:32])
+        all_jobs = list(self.job_roles.values())
+        to_rem = [r for r in i.user.roles if r.name in all_jobs]
+        if to_rem: await i.user.remove_roles(*to_rem)
+        role = discord.utils.get(i.guild.roles, name=self.role_name)
+        if role: await i.user.add_roles(role)
+        try: await i.user.edit(nick=f"{self.emoji}{self.name_input.value.strip()}"[:32])
         except: pass
-        await i.followup.send(f"✅ **{self.role_name}** 설정 완료!", ephemeral=True)
+        await i.followup.send(f"✅ {self.role_name} 설정 완료!", ephemeral=True)
 
 class DynamicJobView(discord.ui.View):
     def __init__(self, job_roles):
         super().__init__(timeout=None)
         self.job_roles = job_roles
-        for emoji, role_name in self.job_roles.items():
-            btn = discord.ui.Button(emoji=emoji, custom_id=f"role_{emoji}", style=discord.ButtonStyle.gray)
-            btn.callback = self.make_cb(emoji, role_name)
+        for emo, name in job_roles.items():
+            btn = discord.ui.Button(emoji=emo, custom_id=f"role_{emo}"); btn.callback = self.make_cb(emo, name)
             self.add_item(btn)
-    def make_cb(self, emoji, role_name):
-        async def cb(i): await i.response.send_modal(NicknameModal(emoji, role_name, self.job_roles))
+    def make_cb(self, emo, name):
+        async def cb(i): await i.response.send_modal(NicknameModal(emo, name, self.job_roles))
         return cb
 
-# --- [모집 시스템] ---
+# --- [모집 시스템] 시간 계산 에러 수정 ---
 class RaidView(discord.ui.View):
     def __init__(self, title, time, limit, end_dt, author):
         super().__init__(timeout=None)
         self.title, self.time, self.limit, self.end_time, self.author = title, time, limit, end_dt, author
         self.roster = {}; self.is_closed = False
-    
     @discord.ui.button(label="참여/변경하기", style=discord.ButtonStyle.primary, emoji="⚔️")
     async def join(self, i, b):
         if not self.is_closed: await i.response.send_modal(RaidEntryModal(self))
-        
     @discord.ui.button(label="참여 취소", style=discord.ButtonStyle.gray)
     async def leave(self, i, b):
         if i.user.id in self.roster:
             self.roster.pop(i.user.id); await i.response.edit_message(embed=self.get_embed())
             a = await i.channel.send(f"⚪ {i.user.display_name} 참여 취소 (get off)"); await a.delete(delay=3)
-            
     @discord.ui.button(label="모집 마감", style=discord.ButtonStyle.danger, emoji="🛑")
     async def close_btn(self, i, b):
         if i.user.id == self.author.id: await self.close_raid(i.message)
-        
     def get_embed(self, closed=False):
         curr = len(self.roster); color = 0x5865F2 if not closed else 0x99AAB5
-        display_time = self.end_time.strftime('%m/%d %H:%M')
-        desc = f"**👤 모집자: {self.author.display_name}**\n📅 **출발:** {self.time}\n👥 **정원:** {self.limit}명 (현재 {curr}명)\n⏰ **마감:** {display_time} 까지"
+        desc = f"**👤 모집자: {self.author.display_name}**\n📅 **출발:** {self.time}\n👥 **정원:** {self.limit}명\n⏰ **마감:** {self.end_time.strftime('%m/%d %H:%M')}"
         embed = discord.Embed(title=f"⚔️ {self.title}{' (종료)' if closed else ''}", description=desc, color=color)
         list_val = "\n".join([f"> {idx+1}. {info}" for idx, info in enumerate(self.roster.values())]) if self.roster else "> 인원 없음"
         embed.add_field(name="👥 참여 명단", value=list_val, inline=False)
         return embed
-        
     async def close_raid(self, message):
         self.is_closed = True; [setattr(item, 'disabled', True) for item in self.children]
         try: await message.edit(embed=self.get_embed(closed=True), view=self)
@@ -131,13 +112,13 @@ class RaidView(discord.ui.View):
 
 class RaidEntryModal(discord.ui.Modal, title='⚔️ 참석 정보'):
     job = discord.ui.TextInput(label='직업', placeholder='(줄임말 없이 작성)')
-    char = discord.ui.TextInput(label='캐릭터명', placeholder='(ex.토끼공듀)')
+    char = discord.ui.TextInput(label='캐릭터명')
     power = discord.ui.TextInput(label='전투력', placeholder='(ex.12+)')
     def __init__(self, rv): super().__init__(); self.rv = rv
     async def on_submit(self, i):
         self.rv.roster[i.user.id] = f"{self.job.value} / {self.char.value} / {self.power.value}"
         await i.response.edit_message(embed=self.rv.get_embed())
-        notif = await i.channel.send(f"🔔 {self.rv.author.mention}님, **{i.user.display_name}**님이 참여! ({self.job.value}/{self.power.value})")
+        notif = await i.channel.send(f"🔔 {self.rv.author.mention}님, **{i.user.display_name}**님이 참여! ({self.job.value})")
         await notif.delete(delay=3)
 
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집'):
@@ -148,21 +129,25 @@ class RecruitModal(discord.ui.Modal, title='📝 레이드 모집'):
     def __init__(self, role=None, setup_i=None): super().__init__(); self.role, self.setup_i = role, setup_i
     async def on_submit(self, i):
         await i.response.defer(ephemeral=True)
-        now_kst = datetime.now(UTC) + timedelta(hours=9)
+        # [수정] 시간대(timezone)를 명시하여 Offset 에러 방지
+        now_kst = datetime.now(timezone(timedelta(hours=9)))
         target_dt = None; nums = re.findall(r'\d+', self.d_in.value)
         if len(nums) >= 4:
             try:
                 y = int(nums[0]); y = y + 2000 if y < 100 else y
-                target_dt = datetime(y, int(nums[1]), int(nums[2]), int(nums[3]), int(nums[4]) if len(nums) >= 5 else 0)
+                # target_dt에도 한국 시간대(KST)를 명시적으로 부여
+                target_dt = datetime(y, int(nums[1]), int(nums[2]), int(nums[3]), int(nums[4]) if len(nums) >= 5 else 0, tzinfo=timezone(timedelta(hours=9)))
             except: pass
         if not target_dt: target_dt = now_kst + timedelta(minutes=30)
+        
         limit = int(re.sub(r'[^0-9]', '', self.l_in.value)) if re.sub(r'[^0-9]', '', self.l_in.value) else 6
         view = RaidView(self.t_in.value, self.tm_in.value, limit, target_dt, i.user)
-        sent = await i.channel.send(content=f"{self.role.mention if self.role else ''} 🌲 **모집 시작!**", embed=view.get_embed(), view=view)
+        sent = await i.channel.send(content=f"{self.role.mention if self.role else ''} 🌲 모집 시작!", embed=view.get_embed(), view=view)
         if self.setup_i: await self.setup_i.delete_original_response()
-        wait_seconds = (target_dt - now_kst).total_seconds()
-        async def timer():
-            await asyncio.sleep(max(0, wait_seconds)); await view.close_raid(sent)
+        
+        # [수정] 이제 둘 다 aware datetime이므로 계산 가능
+        wait_sec = (target_dt - now_kst).total_seconds()
+        async def timer(): await asyncio.sleep(max(0, wait_sec)); await view.close_raid(sent)
         asyncio.create_task(timer())
 
 # --- [티켓 시스템] ---
@@ -179,7 +164,7 @@ class TicketView(discord.ui.View):
         emb = discord.Embed(title=f"📩 {prefix} 접수", description=f"{member.mention}님, 내용을 남겨주세요.\n(3분 무응답 시 자동 종료/get off)", color=0x2f3136)
         emb.set_footer(text=f"로그채널ID: {self.log_ch_id}")
         await ch.send(embed=emb)
-        await i.response.send_message(f"✅ {prefix} 채널 생성됨: {ch.mention}", ephemeral=True)
+        await i.response.send_message(f"✅ 채널 생성됨: {ch.mention}", ephemeral=True)
         def check(m): return m.channel == ch and not m.author.bot
         try: await bot.wait_for('message', check=check, timeout=180.0)
         except asyncio.TimeoutError: await archive_and_delete(ch, self.log_ch_id)
@@ -188,23 +173,14 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, custom_id="btn_report")
     async def report(self, i, b): await self.create_ticket(i, "신고")
 
-# --- 봇 메인 클래스 ---
+# --- 봇 메인 ---
 class MyBot(commands.Bot):
-    def __init__(self): 
-        super().__init__(command_prefix="!", intents=discord.Intents.all())
-        self.db = load_db()
+    def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all()); self.db = load_db()
     async def setup_hook(self):
         if self.db.get("setup_msg_id"): self.add_view(DynamicJobView(self.db["job_roles"]))
         if self.db.get("ticket_settings"):
-            ts = self.db["ticket_settings"]
-            self.add_view(TicketView(ts["admin_role_id"], ts["category_name"], ts["log_ch_id"]))
+            ts = self.db["ticket_settings"]; self.add_view(TicketView(ts["admin_role_id"], ts["category_name"], ts["log_ch_id"]))
         await self.tree.sync()
-    async def on_member_join(self, m):
-        r_id = self.db.get("auto_role")
-        if r_id:
-            role = m.guild.get_role(r_id)
-            if role: await m.add_roles(role)
-
 bot = MyBot()
 
 @bot.tree.command(name="모집")
