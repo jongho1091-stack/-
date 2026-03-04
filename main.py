@@ -89,9 +89,9 @@ class RaidEntryModal(discord.ui.Modal, title='⚔️ 레이드 참석 정보 입
         await interaction.response.edit_message(embed=self.raid_view.get_embed())
 
 class RaidView(discord.ui.View):
-    def __init__(self, title, time, limit, author):
+    def __init__(self, title, time, limit, author, close_time):
         super().__init__(timeout=None)
-        self.title, self.time, self.limit, self.author = title, time, limit, author
+        self.title, self.time, self.limit, self.author, self.close_time = title, time, limit, author, close_time
         self.roster, self.participants, self.is_closed = {}, set(), False
     @discord.ui.button(label="참석/변경하기", style=discord.ButtonStyle.primary, emoji="⚔️", custom_id="join_raid")
     async def join(self, i, b):
@@ -105,7 +105,7 @@ class RaidView(discord.ui.View):
         else: await i.response.send_message("참여 중 아님", ephemeral=True)
     def get_embed(self, closed=False):
         color = 0x5865F2 if not closed else 0x99AAB5
-        desc = f"**👤 모집자: {self.author.display_name}**\n📅 **출발 시간:** {self.time}\n👥 **정원:** {self.limit}명"
+        desc = f"**👤 모집자: {self.author.display_name}**\n📅 **출발 시간:** {self.time}\n👥 **정원:** {self.limit}명\n⏰ **마감 시간:** {self.close_time}"
         embed = discord.Embed(title=f"⚔️ {self.title}", description=desc, color=color)
         list_val = "\n".join([f"> {idx+1}. ({info})" for idx, info in enumerate(self.roster.values())]) if self.roster else "참여 인원 없음"
         embed.add_field(name="참여 명단", value=list_val, inline=False); return embed
@@ -136,11 +136,15 @@ async def recruit(interaction):
     await interaction.response.send_message("모집 설정", view=RoleSelectView(), ephemeral=True)
 
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집'):
-    t = discord.ui.TextInput(label='제목'); tm = discord.ui.TextInput(label='출발 시간'); l = discord.ui.TextInput(label='인원')
+    t = discord.ui.TextInput(label='제목', placeholder='ㅇㅇ 4인 파티')
+    tm = discord.ui.TextInput(label='출발 시간', placeholder='오늘 저녁 11시')
+    l = discord.ui.TextInput(label='인원', placeholder='숫자만 입력')
+    ct = discord.ui.TextInput(label='마감 시간', placeholder='2026-03-04-21:00 / 반드시 이 형식으로 적을 것')
     def __init__(self, role=None): super().__init__(); self.role = role
     async def on_submit(self, i):
-        limit = int(re.sub(r'[^0-9]', '', self.l.value)) if re.sub(r'[^0-9]', '', self.l.value) else 6
-        view = RaidView(self.t.value, self.tm.value, limit, i.user)
+        limit_val = re.sub(r'[^0-9]', '', self.l.value)
+        limit = int(limit_val) if limit_val else 6
+        view = RaidView(self.t.value, self.tm.value, limit, i.user, self.ct.value)
         await i.channel.send(content=f"{self.role.mention if self.role else ''} 🌲 모집 시작!", embed=view.get_embed(), view=view)
         await i.response.send_message("작성 완료", ephemeral=True)
 
@@ -173,7 +177,9 @@ async def close_ticket(i):
     if "-" not in i.channel.name: return await i.response.send_message("❌ 상담 채널 아님", ephemeral=True)
     await i.response.defer(ephemeral=True); log_ch = None
     async for msg in i.channel.history(oldest_first=True, limit=1):
-        if msg.embeds: log_ch = i.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
+        if msg.embeds:
+            try: log_ch = i.guild.get_channel(int(msg.embeds[0].footer.text.split(": ")[1]))
+            except: pass
     history = [f"[{m.created_at.strftime('%m-%d %H:%M')}] {m.author.display_name}: {m.content}" async for m in i.channel.history(limit=None, oldest_first=True)]
     with open("log.txt", "w", encoding="utf-8") as f: f.write("\n".join(history))
     if log_ch: await log_ch.send(f"📂 **종료 기록: {i.channel.name}**", file=discord.File("log.txt"))
