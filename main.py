@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, UTC
 from flask import Flask
 from threading import Thread
 
-# --- 서버 유지용 ---
+# --- Render 서버 유지용 ---
 app = Flask('')
 @app.route('/')
 def home(): return "Bot is alive!"
@@ -71,7 +71,7 @@ class DynamicJobView(discord.ui.View):
         async def cb(i): await i.response.send_modal(NicknameModal(emoji, role_name, self.job_roles))
         return cb
 
-# --- [모집 시스템] ---
+# --- [모집 시스템] 서울 시간 기준 ---
 class RaidView(discord.ui.View):
     def __init__(self, title, time, limit, end_dt, author):
         super().__init__(timeout=None)
@@ -108,6 +108,9 @@ class RaidEntryModal(discord.ui.Modal, title='⚔️ 참석 정보'):
     async def on_submit(self, i):
         self.rv.roster[i.user.id] = f"{self.job.value} / {self.char.value}"
         await i.response.edit_message(embed=self.rv.get_embed())
+        # [수정] 3초 뒤 자동 삭제되는 멘션 알림
+        notif = await i.channel.send(f"🔔 {self.rv.author.mention}님, **{i.user.display_name}**님이 참여했습니다! ({self.job.value})")
+        await notif.delete(delay=3)
 
 class RecruitModal(discord.ui.Modal, title='📝 레이드 모집'):
     t_in = discord.ui.TextInput(label='제목', placeholder='')
@@ -139,22 +142,25 @@ class TicketView(discord.ui.View):
     def __init__(self, admin_role_id, category_name, log_ch_id):
         super().__init__(timeout=None)
         self.admin_role_id, self.category_name, self.log_ch_id = admin_role_id, category_name, log_ch_id
-    @discord.ui.button(label="문의/신고 접수", style=discord.ButtonStyle.success, custom_id="ticket_v3")
-    async def open_ticket(self, i, b):
+    async def create_ticket(self, i, prefix):
         guild, member = i.guild, i.user
         category = discord.utils.get(guild.categories, name=self.category_name) or await guild.create_category(self.category_name)
         admin_role = guild.get_role(self.admin_role_id)
         over = {guild.default_role: discord.PermissionOverwrite(read_messages=False), member: discord.PermissionOverwrite(read_messages=True, send_messages=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)}
-        ch = await guild.create_text_channel(name=f"문의-{member.display_name}", category=category, overwrites=over)
-        emb = discord.Embed(title="📩 문의 접수", description=f"{member.mention}님, 문의 내용을 남겨주세요.\n(3분 무응답 시 자동 종료/get off)", color=0x2f3136)
+        ch = await guild.create_text_channel(name=f"{prefix}-{member.display_name}", category=category, overwrites=over)
+        emb = discord.Embed(title=f"📩 {prefix} 접수", description=f"{member.mention}님, 내용을 남겨주세요.\n(3분 무응답 시 자동 종료/get off)", color=0x2f3136)
         emb.set_footer(text=f"로그채널ID: {self.log_ch_id}")
         await ch.send(embed=emb)
-        await i.response.send_message(f"✅ 티켓 생성됨: {ch.mention}", ephemeral=True)
+        await i.response.send_message(f"✅ {prefix} 채널 생성됨: {ch.mention}", ephemeral=True)
         def check(m): return m.channel == ch and not m.author.bot
         try: await bot.wait_for('message', check=check, timeout=180.0)
         except asyncio.TimeoutError: await archive_and_delete(ch, self.log_ch_id)
+    @discord.ui.button(label="문의/건의하기", style=discord.ButtonStyle.success, custom_id="btn_inquiry")
+    async def inquiry(self, i, b): await self.create_ticket(i, "문의")
+    @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, custom_id="btn_report")
+    async def report(self, i, b): await self.create_ticket(i, "신고")
 
-# --- [봇 메인] ---
+# --- 봇 메인 ---
 class MyBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all()); self.db = load_db()
     async def setup_hook(self):
@@ -193,8 +199,10 @@ async def ticket_setup(i, 관리자역할: discord.Role, 상담카테고리명: 
 
 @bot.tree.command(name="상담종료")
 async def close_ticket(i):
-    if "문의-" in i.channel.name:
-        log_id = int(i.channel.last_message.embeds[0].footer.text.split(": ")[1]) if i.channel.last_message and i.channel.last_message.embeds else None
+    if "문의-" in i.channel.name or "신고-" in i.channel.name:
+        log_id = None
+        async for m in i.channel.history(oldest_first=True, limit=1):
+            if m.embeds and m.embeds[0].footer: log_id = int(m.embeds[0].footer.text.split(": ")[1])
         await i.response.send_message("🏁 종료 중..."); await archive_and_delete(i.channel, log_id)
 
 @bot.tree.command(name="직업설정판_생성")
