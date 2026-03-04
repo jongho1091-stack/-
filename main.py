@@ -119,8 +119,9 @@ class MyBot(commands.Bot):
         r_id = self.db.get(str(m.guild.id), {}).get("auto_role_id")
         if r_id:
             role = m.guild.get_role(r_id)
-            if role: try: await m.add_roles(role)
-            except: pass
+            if role:
+                try: await m.add_roles(role)
+                except: pass
 
 bot = MyBot()
 
