@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, UTC
 from flask import Flask
 from threading import Thread
 
-# --- 서버 유지용 (24시간 구동) ---
+# --- 서버 유지용 (Render/Replit 24시간 구동용) ---
 app = Flask('')
 @app.route('/')
 def home(): return "Bot is alive!"
@@ -16,7 +16,8 @@ def keep_alive(): Thread(target=run).start()
 # --- 데이터 저장 시스템 ---
 DB_FILE = "guild_settings.json"
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
+    with open(DB_FILE, 'w', encoding='utf-8') as f: 
+        json.dump(data, f, ensure_ascii=False, indent=4)
 def load_db():
     if os.path.exists(DB_FILE):
         try:
@@ -39,7 +40,24 @@ async def archive_and_delete(channel, log_ch_id):
     try: await channel.delete()
     except: pass
 
-# --- [역할 시스템] 별명 입력 및 직업 부여 ---
+# --- [역할 시스템] 1. 문구 수정용 팝업창 ---
+class EditSetupModal(discord.ui.Modal, title='📝 설정판 문구 수정'):
+    content_input = discord.ui.TextInput(
+        label='수정할 내용을 입력하세요 (마크다운 가능)',
+        style=discord.TextStyle.paragraph,
+        placeholder='**우리 길드 직업 설정**\n\n아래 버튼을 클릭해 직업을 선택하세요!',
+        required=True,
+        max_length=1500
+    )
+    def __init__(self, msg, job_roles):
+        super().__init__()
+        self.msg, self.job_roles = msg, job_roles
+        self.content_input.default = msg.content
+    async def on_submit(self, i: discord.Interaction):
+        await self.msg.edit(content=self.content_input.value, view=DynamicJobView(self.job_roles))
+        await i.response.send_message("✅ 설정판 문구가 수정되었습니다!", ephemeral=True)
+
+# --- [역할 시스템] 2. 별명 입력창 ---
 class NicknameModal(discord.ui.Modal, title='📝 별명 입력'):
     name_input = discord.ui.TextInput(label='사용하실 별명을 입력해주세요', placeholder='(ex.토끼공듀)', min_length=1, max_length=20)
     def __init__(self, emoji, role_name, job_roles):
@@ -59,23 +77,6 @@ class NicknameModal(discord.ui.Modal, title='📝 별명 입력'):
         except: pass
         await i.followup.send(f"✅ **{self.role_name}** 설정 완료!", ephemeral=True)
 
-# --- [역할 시스템] 설정판 문구 팝업 수정창 ---
-class EditSetupModal(discord.ui.Modal, title='📝 설정판 문구 수정'):
-    content_input = discord.ui.TextInput(
-        label='수정할 내용을 입력하세요 (마크다운 가능)',
-        style=discord.TextStyle.paragraph,
-        placeholder='**공지사항**\n아래 버튼을 클릭해 직업을 선택하세요!',
-        required=True,
-        max_length=1500
-    )
-    def __init__(self, msg, job_roles):
-        super().__init__()
-        self.msg, self.job_roles = msg, job_roles
-        self.content_input.default = msg.content
-    async def on_submit(self, i: discord.Interaction):
-        await self.msg.edit(content=self.content_input.value, view=DynamicJobView(self.job_roles))
-        await i.response.send_message("✅ 설정판 문구가 수정되었습니다!", ephemeral=True)
-
 class DynamicJobView(discord.ui.View):
     def __init__(self, job_roles):
         super().__init__(timeout=None)
@@ -88,7 +89,7 @@ class DynamicJobView(discord.ui.View):
         async def cb(i): await i.response.send_modal(NicknameModal(emoji, role_name, self.job_roles))
         return cb
 
-# --- [모집 시스템] 참여 명단 및 모집 로직 ---
+# --- [모집 시스템] ---
 class RaidView(discord.ui.View):
     def __init__(self, title, time, limit, end_dt, author):
         super().__init__(timeout=None)
@@ -182,9 +183,11 @@ class TicketView(discord.ui.View):
     @discord.ui.button(label="신고하기", style=discord.ButtonStyle.danger, custom_id="btn_report")
     async def report(self, i, b): await self.create_ticket(i, "신고")
 
-# --- 봇 메인 ---
+# --- 봇 메인 클래스 ---
 class MyBot(commands.Bot):
-    def __init__(self): super().__init__(command_prefix="!", intents=discord.Intents.all()); self.db = load_db()
+    def __init__(self): 
+        super().__init__(command_prefix="!", intents=discord.Intents.all())
+        self.db = load_db()
     async def setup_hook(self):
         if self.db.get("setup_msg_id"): self.add_view(DynamicJobView(self.db["job_roles"]))
         if self.db.get("ticket_settings"):
